@@ -867,7 +867,7 @@
 
             try {
                 if (regContactType === 'email') {
-                    await emailjs.send('service_xny0rnb', 'template_vhni5qq', {
+                    await emailjs.send('service_xny0rnb', 'template_wrye0wo', {
                         to_email: contact,
                         message: '您的注册验证码是：' + code + '，10分钟内有效，请勿泄露给他人。',
                         subject: '晚自习系统 - 注册验证码'
@@ -928,7 +928,7 @@
             return true;
         }
         function clearRegErrors() {
-            ['regRealname','regUsername','regEmail','regPhone','regVerifyCode','regPassword','regPasswordConfirm','regSubject'].forEach(function(id){
+            ['regRealname','regUsername','regEmail','regPhone','regPassword','regPasswordConfirm','regSubject'].forEach(function(id){
                 var el = document.getElementById(id);
                 if (el) el.classList.remove('input-error');
             });
@@ -940,7 +940,6 @@
             var username = document.getElementById('regUsername').value.trim();
             var email = document.getElementById('regEmail').value.trim();
             var phone = document.getElementById('regPhone').value.trim();
-            var verifyCode = document.getElementById('regVerifyCode').value.trim();
             var pw = document.getElementById('regPassword').value;
             var pwConfirm = document.getElementById('regPasswordConfirm').value;
             var subject = document.getElementById('regSubject').value;
@@ -966,9 +965,6 @@
             if (regContactType === 'phone' && !/^1[3-9]\d{9}$/.test(contact)) {
                 return markRegError('regPhone', '手机号格式不正确');
             }
-            if (!verifyCode) {
-                return markRegError('regVerifyCode', '请输入验证码');
-            }
             if (!pw) {
                 return markRegError('regPassword', '请填写密码');
             }
@@ -989,21 +985,6 @@
             }
             if (regRole === 'teacher' && !subject) {
                 return markRegError('regSubject', '请选择任教学科');
-            }
-
-            msg.textContent = '验证中…'; msg.className = 'msg';
-            var codeValid = false;
-            if (_regVerifyCode === verifyCode && Date.now() < _regVerifyExpires) {
-                codeValid = true;
-            } else {
-                try {
-                    codeValid = await DB.verifyCode(username, regContactType === 'email' ? contact : '', verifyCode);
-                } catch(e) { codeValid = false; }
-            }
-            if (!codeValid) {
-                msg.textContent = '验证码错误或已过期，请重新获取';
-                msg.className = 'msg error';
-                return;
             }
 
             msg.textContent = '注册中…'; msg.className = 'msg';
@@ -3577,15 +3558,7 @@
                     <input type="email" id="regEmail" placeholder="请输入邮箱" style="margin-top:0.5rem;">
                     <input type="tel" id="regPhone" placeholder="请输入手机号" class="hidden" style="margin-top:0.5rem;">
                 </div>
-                <!-- 验证码 -->
-                <div class="form-group">
-                    <label>验证码 *</label>
-                    <div class="verify-code-row">
-                        <input type="text" id="regVerifyCode" placeholder="6位验证码" maxlength="6">
-                        <button class="btn-secondary" id="sendCodeBtn" onclick="sendRegisterVerifyCode()">发送验证码</button>
-                    </div>
-                    <div class="verify-hint" id="verifyHint"></div>
-                </div>
+                <!-- 验证码（已移除：晚自习系统无需验证） -->
                 <div class="form-group">
                     <label>密码 * <span class="pwd-hint">(至少6位，含字母、数字、特殊字符中至少两项)</span></label>
                     <input type="password" id="regPassword" placeholder="请输入密码" oninput="checkPasswordStrength(this.value)">
