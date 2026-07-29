@@ -873,18 +873,21 @@
                         subject: '晚自习系统 - 注册验证码'
                     });
                 } else {
-                    var smsResp = await fetch('https://textbelt.com/text', {
+                    // 通过 Spug 推送平台发送短信（国内三大运营商均支持，¥0.08/条）
+                    // 请先在 https://push.spug.cc 注册并创建短信验证码模板，将下面的 SPUG_SMS_TPL 替换为你的模板 ID
+                    var SPUG_SMS_TPL = 'YOUR_SPUG_TEMPLATE_ID'; // ← 替换为你的 Spug 模板 ID
+                    var smsResp = await fetch('https://push.spug.cc/send/' + SPUG_SMS_TPL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            phone: contact,
-                            message: '【晚自习系统】您的注册验证码是：' + code + '，10分钟内有效。',
-                            key: 'textbelt'
+                            name: '晚自习系统',
+                            code: code,
+                            targets: contact
                         })
                     });
                     var smsResult = await smsResp.json();
-                    if (!smsResult.success) {
-                        throw new Error(smsResult.error || '短信发送失败');
+                    if (smsResult.code !== 0) {
+                        throw new Error(smsResult.message || '短信发送失败');
                     }
                 }
 
