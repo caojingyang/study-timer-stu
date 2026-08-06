@@ -6,6 +6,50 @@
     <title>高二（13）班专属计时系统</title>
     <link href="tailwind.min.css?v=2" rel="stylesheet">
     <link href="font-awesome.min.css?v=2" rel="stylesheet">
+    <style>
+        /* ===== 触摸/点击响应速度优化（适配教室大屏） ===== */
+
+        /* 1. 全局触摸优化 */
+        * {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
+        html, body {
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* 7. 所有按钮类元素禁用双击缩放，保证即时响应（含可滚动区域 editMode 内的按钮） */
+        button, .feedback-btn, .triangle-btn, .noise-report-close-btn, .changelog-btn,
+        .menu-btn, .modify-task-btn, .adjust-circle-btn, .notification-ack-btn,
+        .notification-list-btn, .glass-effect {
+            touch-action: manipulation;
+        }
+
+        /* 2. 超快过渡（覆盖原有 0.3s，改为 0.05s） */
+        .menu-btn, .modify-task-btn, .adjust-circle-btn, .notification-ack-btn,
+        .notification-list-btn, .changelog-btn, .feedback-btn, .noise-report-close-btn,
+        .triangle-btn {
+            transition: all 0.05s ease !important;
+        }
+
+        /* 3. 为缺少 :active 状态的按钮补充按压反馈 */
+        .triangle-btn:active { opacity: 0.8; }
+        .noise-report-close-btn:active { transform: scale(0.95); }
+        .feedback-btn:active { transform: scale(0.95); }
+        .glass-effect:active { background: rgba(255, 255, 255, 0.25); }
+
+        /* 4. 数字键盘按钮优化 */
+        .num-keyboard button {
+            transition: transform 0.05s ease, background-color 0.05s ease !important;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .num-keyboard button:active {
+            transform: scale(0.92);
+        }
+    </style>
 </head>
 <body class="min-h-screen overflow-hidden">
     <!-- 数据库状态提示 toast（页面顶部，4 秒消失） -->
@@ -149,7 +193,7 @@
                 </table>
 
                 <div class="mt-4 text-center">
-                    <button onclick="addHomeworkRow()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-primary hover:bg-primary/90 active:bg-primary/80 text-white px-6 py-2 rounded-lg flex items-center gap-2 mx-auto">
+                    <button onclick="addHomeworkRow()" class="bg-primary hover:bg-primary/90 active:bg-primary/80 text-white px-6 py-2 rounded-lg flex items-center gap-2 mx-auto">
                         <i class="fa fa-plus"></i>
                         添加作业项目
                     </button>
@@ -160,7 +204,7 @@
                 <button onclick="backToMenu()" class="bg-gray-500 hover:bg-gray-600 active:bg-gray-700 text-white px-6 py-3 rounded-lg text-lg font-semibold shadow-lg transition-all">
                     <i class="fa fa-arrow-left mr-2"></i>返回主菜单
                 </button>
-                <button onclick="showStartTimeModal()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white px-8 py-3 rounded-lg text-lg font-semibold shadow-lg transition-all">
+                <button onclick="showStartTimeModal()" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white px-8 py-3 rounded-lg text-lg font-semibold shadow-lg transition-all">
                     <i class="fa fa-save mr-2"></i>
                     保存作业
                 </button>
@@ -266,16 +310,16 @@
         <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
             <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">选择科目</h3>
             <div class="grid grid-cols-2 gap-3">
-                <button onclick="selectSubject('语文')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-800 py-3 rounded-lg">语文</button>
-                <button onclick="selectSubject('数学')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-red-100 hover:bg-red-200 active:bg-red-300 text-red-800 py-3 rounded-lg">数学</button>
-                <button onclick="selectSubject('英语')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-800 py-3 rounded-lg">英语</button>
-                <button onclick="selectSubject('英语订正')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-800 py-3 rounded-lg">英语订正</button>
-                <button onclick="selectSubject('物理')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-purple-100 hover:bg-purple-200 active:bg-purple-300 text-purple-800 py-3 rounded-lg">物理</button>
-                <button onclick="selectSubject('化学')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-orange-100 hover:bg-orange-200 active:bg-orange-300 text-orange-800 py-3 rounded-lg">化学</button>
-                <button onclick="selectSubject('生物')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-teal-100 hover:bg-teal-200 active:bg-teal-300 text-teal-800 py-3 rounded-lg">生物</button>
-                <button onclick="selectOtherSubject()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-3 rounded-lg">其他</button>
+                <button onclick="selectSubject('语文')" class="bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-800 py-3 rounded-lg">语文</button>
+                <button onclick="selectSubject('数学')" class="bg-red-100 hover:bg-red-200 active:bg-red-300 text-red-800 py-3 rounded-lg">数学</button>
+                <button onclick="selectSubject('英语')" class="bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-800 py-3 rounded-lg">英语</button>
+                <button onclick="selectSubject('英语订正')" class="bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-800 py-3 rounded-lg">英语订正</button>
+                <button onclick="selectSubject('物理')" class="bg-purple-100 hover:bg-purple-200 active:bg-purple-300 text-purple-800 py-3 rounded-lg">物理</button>
+                <button onclick="selectSubject('化学')" class="bg-orange-100 hover:bg-orange-200 active:bg-orange-300 text-orange-800 py-3 rounded-lg">化学</button>
+                <button onclick="selectSubject('生物')" class="bg-teal-100 hover:bg-teal-200 active:bg-teal-300 text-teal-800 py-3 rounded-lg">生物</button>
+                <button onclick="selectOtherSubject()" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-3 rounded-lg">其他</button>
             </div>
-            <button onclick="closeSubjectModal()" onmousedown="this.style.transform='scale(0.98)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.98)'" ontouchend="this.style.transform='scale(1)'" class="mt-4 w-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 text-gray-700 py-2 rounded-lg">取消</button>
+            <button onclick="closeSubjectModal()" class="mt-4 w-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 text-gray-700 py-2 rounded-lg">取消</button>
         </div>
     </div>
 
@@ -297,18 +341,18 @@
             <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">输入完成用时（分钟）</h3>
             <input type="text" id="timeInput" readonly placeholder="0" class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-2xl text-center font-mono focus:border-primary outline-none mb-4">
             <div class="num-keyboard">
-                <button onclick="inputNumber('1')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">1</button>
-                <button onclick="inputNumber('2')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">2</button>
-                <button onclick="inputNumber('3')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">3</button>
-                <button onclick="inputNumber('4')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">4</button>
-                <button onclick="inputNumber('5')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">5</button>
-                <button onclick="inputNumber('6')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">6</button>
-                <button onclick="inputNumber('7')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">7</button>
-                <button onclick="inputNumber('8')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">8</button>
-                <button onclick="inputNumber('9')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">9</button>
-                <button onclick="backspace()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-yellow-100 hover:bg-yellow-200 active:bg-yellow-300 text-yellow-800 py-4 text-xl rounded-lg">←</button>
-                <button onclick="inputNumber('0')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">0</button>
-                <button onclick="saveTimeInput()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white py-4 text-xl rounded-lg">保存</button>
+                <button onclick="inputNumber('1')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">1</button>
+                <button onclick="inputNumber('2')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">2</button>
+                <button onclick="inputNumber('3')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">3</button>
+                <button onclick="inputNumber('4')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">4</button>
+                <button onclick="inputNumber('5')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">5</button>
+                <button onclick="inputNumber('6')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">6</button>
+                <button onclick="inputNumber('7')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">7</button>
+                <button onclick="inputNumber('8')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">8</button>
+                <button onclick="inputNumber('9')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">9</button>
+                <button onclick="backspace()" class="bg-yellow-100 hover:bg-yellow-200 active:bg-yellow-300 text-yellow-800 py-4 text-xl rounded-lg">←</button>
+                <button onclick="inputNumber('0')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">0</button>
+                <button onclick="saveTimeInput()" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white py-4 text-xl rounded-lg">保存</button>
             </div>
         </div>
     </div>
@@ -341,18 +385,18 @@
             <h3 id="timePartTitle" class="text-xl font-bold text-gray-800 mb-4 text-center">设置小时</h3>
             <input type="text" id="timePartInput" readonly placeholder="0" class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-2xl text-center font-mono focus:border-primary outline-none mb-4">
             <div class="num-keyboard">
-                <button onclick="inputTimePartNumber('1')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">1</button>
-                <button onclick="inputTimePartNumber('2')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">2</button>
-                <button onclick="inputTimePartNumber('3')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">3</button>
-                <button onclick="inputTimePartNumber('4')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">4</button>
-                <button onclick="inputTimePartNumber('5')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">5</button>
-                <button onclick="inputTimePartNumber('6')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">6</button>
-                <button onclick="inputTimePartNumber('7')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">7</button>
-                <button onclick="inputTimePartNumber('8')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">8</button>
-                <button onclick="inputTimePartNumber('9')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">9</button>
-                <button onclick="timePartBackspace()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-yellow-100 hover:bg-yellow-200 active:bg-yellow-300 text-yellow-800 py-4 text-xl rounded-lg">←</button>
-                <button onclick="inputTimePartNumber('0')" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">0</button>
-                <button onclick="saveTimePart()" onmousedown="this.style.transform='scale(0.95)'" onmouseup="this.style.transform='scale(1)'" onmouseleave="this.style.transform='scale(1)'" ontouchstart="this.style.transform='scale(0.95)'" ontouchend="this.style.transform='scale(1)'" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white py-4 text-xl rounded-lg">保存</button>
+                <button onclick="inputTimePartNumber('1')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">1</button>
+                <button onclick="inputTimePartNumber('2')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">2</button>
+                <button onclick="inputTimePartNumber('3')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">3</button>
+                <button onclick="inputTimePartNumber('4')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">4</button>
+                <button onclick="inputTimePartNumber('5')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">5</button>
+                <button onclick="inputTimePartNumber('6')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">6</button>
+                <button onclick="inputTimePartNumber('7')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">7</button>
+                <button onclick="inputTimePartNumber('8')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">8</button>
+                <button onclick="inputTimePartNumber('9')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">9</button>
+                <button onclick="timePartBackspace()" class="bg-yellow-100 hover:bg-yellow-200 active:bg-yellow-300 text-yellow-800 py-4 text-xl rounded-lg">←</button>
+                <button onclick="inputTimePartNumber('0')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">0</button>
+                <button onclick="saveTimePart()" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white py-4 text-xl rounded-lg">保存</button>
             </div>
         </div>
     </div>
