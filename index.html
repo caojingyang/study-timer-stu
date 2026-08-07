@@ -1405,57 +1405,52 @@
             let hwStart = startTime.hour * 60 + startTime.minute;
             let breakInserted = false;
 
+            const fmtTime = (totalMin) => {
+                const h = Math.floor(totalMin / 60) % 24;
+                const m = totalMin % 60;
+                return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+            };
+
             homeworkList.forEach((row, index) => {
                 const timeMin = row.time || 0;
                 let hwEnd = hwStart + timeMin;
                 let estTimeHtml = '<span class="text-gray-400 text-sm">—</span>';
-                let isBreakRow = false;
 
                 if (row.time) {
-                    // 作业跨越 20:20-20:30 下课时间，结束时间顺延
-                    if (hwStart < breakEnd && hwEnd > breakStart) {
-                        const overlap = Math.min(hwEnd, breakEnd) - Math.max(hwStart, breakStart);
-                        if (overlap > 0) {
-                            // 插入课间休息行
-                            if (!breakInserted) {
-                                const breakTr = document.createElement('tr');
-                                breakTr.className = 'border-b border-gray-100';
-                                breakTr.style.background = '#fef3c7';
-                                breakTr.innerHTML = `
-                                    <td class="py-3 px-4 text-amber-700">—</td>
-                                    <td class="py-3 px-4 text-amber-700 font-semibold">☕ 课间休息</td>
-                                    <td class="py-3 px-4 text-amber-700">10min</td>
-                                    <td class="py-3 px-4 text-amber-700 text-sm">20:20 - 20:30</td>
-                                    <td class="py-3 px-4"></td>
-                                `;
-                                tbody.appendChild(breakTr);
-                                breakInserted = true;
-                            }
-                            hwEnd += overlap;
-                        }
-                    }
-                    // 课间休息在两项作业之间
-                    if (!breakInserted && hwStart >= breakEnd) {
-                        const breakTr = document.createElement('tr');
-                        breakTr.className = 'border-b border-gray-100';
-                        breakTr.style.background = '#fef3c7';
-                        breakTr.innerHTML = `
-                            <td class="py-3 px-4 text-amber-700">—</td>
-                            <td class="py-3 px-4 text-amber-700 font-semibold">☕ 课间休息</td>
-                            <td class="py-3 px-4 text-amber-700">10min</td>
-                            <td class="py-3 px-4 text-amber-700 text-sm">20:20 - 20:30</td>
-                            <td class="py-3 px-4"></td>
-                        `;
-                        tbody.appendChild(breakTr);
+                    // 检查是否跨越下课时间（作业在下课前开始，且会持续到下课期间）
+                    if (hwStart < breakStart && hwEnd > breakStart) {
+                        // 跨下课项目：预计时间分三行显示
+                        const overlap = Math.min(hwEnd, breakEnd) - breakStart;
+                        hwEnd += overlap;
+                        estTimeHtml = `<div style="font-size:0.75rem;line-height:1.7;">
+                            <div class="text-gray-600 font-medium">${fmtTime(hwStart)} - ${fmtTime(breakStart)}</div>
+                            <div style="color:#92400e;font-weight:600;">☕ 课间休息 ${fmtTime(breakStart)} - ${fmtTime(breakEnd)}</div>
+                            <div class="text-gray-600 font-medium">${fmtTime(breakEnd)} - ${fmtTime(hwEnd)}</div>
+                        </div>`;
                         breakInserted = true;
+                    } else {
+                        // 非跨下课项目：检查是否需要插入课间休息独立行
+                        if (!breakInserted && hwStart >= breakStart) {
+                            // 如果作业在下课期间开始，顺延到下课后
+                            if (hwStart < breakEnd) {
+                                hwStart = breakEnd;
+                                hwEnd = hwStart + timeMin;
+                            }
+                            const breakTr = document.createElement('tr');
+                            breakTr.className = 'border-b border-gray-100';
+                            breakTr.style.background = '#fef3c7';
+                            breakTr.innerHTML = `
+                                <td class="py-3 px-4 text-amber-700">—</td>
+                                <td class="py-3 px-4 text-amber-700 font-semibold">☕ 课间休息</td>
+                                <td class="py-3 px-4 text-amber-700">10min</td>
+                                <td class="py-3 px-4 text-amber-700 text-sm">${fmtTime(breakStart)} - ${fmtTime(breakEnd)}</td>
+                                <td class="py-3 px-4"></td>
+                            `;
+                            tbody.appendChild(breakTr);
+                            breakInserted = true;
+                        }
+                        estTimeHtml = `<span class="text-gray-600 text-sm font-medium">${fmtTime(hwStart)} - ${fmtTime(hwEnd)}</span>`;
                     }
-
-                    const fmtTime = (totalMin) => {
-                        const h = Math.floor(totalMin / 60) % 24;
-                        const m = totalMin % 60;
-                        return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-                    };
-                    estTimeHtml = `<span class="text-gray-600 text-sm font-medium">${fmtTime(hwStart)} - ${fmtTime(hwEnd)}</span>`;
                 }
 
                 const tr = document.createElement('tr');
