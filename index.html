@@ -566,23 +566,70 @@
 
         // ==================== 时间表数据库方法 ====================
         var DB = {
-            // 保存时间表（存在则更新，不存在则插入），返回 true/false
-            saveSchedule: function(date, startTimeStr, hwList) {
+            // 带超时的 fetch 封装（超时毫秒）
+            _fetchWithTimeout: function(url, opts, timeoutMs) {
+                var controller = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
+                var finalOpts = Object.assign({}, opts, { signal: controller.signal });
+                return fetch(url, finalOpts).then(function(r) {
+                    clearTimeout(timer);
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                }).catch(function(e) {
+                    clearTimeout(timer);
+                    throw e;
+                });
+            },
+            // 单次保存时间表尝试（带20s超时）
+            _saveScheduleOnce: function(date, startTimeStr, hwList) {
                 var payload = {
                     date: date,
                     start_time: startTimeStr,
                     homework_list: JSON.stringify(hwList)
                 };
-                return sbGetSingle('schedules', 'date', date, 'id').then(function(existing) {
+                var self = this;
+                // 查询是否存在（带超时）
+                var queryUrl = SUPABASE_URL + '/rest/v1/schedules?date=eq.' + encodeURIComponent(date) + '&select=id';
+                return self._fetchWithTimeout(queryUrl, { headers: { 'Content-Type': 'application/json' } }, 20000).then(function(data) {
+                    var existing = (data && data.length > 0) ? data[0] : null;
+                    var fullPayload = Object.assign({}, payload, { updated_at: new Date().toISOString() });
                     if (existing && existing.id) {
-                        return sbUpdate('schedules', 'id', existing.id, Object.assign(payload, { updated_at: new Date().toISOString() })).then(function() { return true; });
+                        // 更新（带超时）
+                        var updateUrl = SUPABASE_URL + '/rest/v1/schedules?id=eq.' + encodeURIComponent(existing.id);
+                        return self._fetchWithTimeout(updateUrl, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(fullPayload)
+                        }, 20000).then(function() { return true; });
                     } else {
-                        return sbInsert('schedules', Object.assign(payload, { created_at: new Date().toISOString(), updated_at: new Date().toISOString() })).then(function() { return true; });
+                        // 插入（带超时）
+                        var insertPayload = Object.assign({}, fullPayload, { created_at: new Date().toISOString() });
+                        return self._fetchWithTimeout(SUPABASE_URL + '/rest/v1/schedules', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(insertPayload)
+                        }, 20000).then(function() { return true; });
                     }
-                }).catch(function(e) {
-                    console.warn('DB.saveSchedule 失败:', e);
-                    return false;
                 });
+            },
+            // 保存时间表（最多重试10次，每次超时20s，全部失败返回 false）
+            saveSchedule: function(date, startTimeStr, hwList) {
+                var self = this;
+                var maxRetries = 10;
+                function attempt(n) {
+                    return self._saveScheduleOnce(date, startTimeStr, hwList).then(function() {
+                        if (n > 1) console.log('DB.saveSchedule 第 ' + n + ' 次尝试成功');
+                        return true;
+                    }).catch(function(e) {
+                        console.warn('DB.saveSchedule 第 ' + n + ' 次尝试失败:', e.message || e);
+                        if (n >= maxRetries) {
+                            console.warn('DB.saveSchedule 已达到最大重试次数(' + maxRetries + ')，放弃数据库存储');
+                            return false;
+                        }
+                        return attempt(n + 1);
+                    });
+                }
+                return attempt(1);
             },
             // 获取某日时间表，返回 {date, start_time, homework_list, updated_at} 或 null
             getSchedule: function(date) {
@@ -1692,29 +1739,62 @@
                 startTime: String(startTime.hour).padStart(2, '0') + ':' + String(startTime.minute).padStart(2, '0'),
                 date: new Date().toISOString().split('T')[0]
             };
-            // 优先数据库存储
+            // 优先数据库存储（最多重试10次，每次超时20s）
+            showScheduleStatus('正在上传时间表至数据库…', 'info');
             DB.saveSchedule(schedulePayload.date, schedulePayload.startTime, schedulePayload.homeworkList).then(function(ok) {
                 if (ok) {
                     showScheduleStatus('时间表已保存至数据库', 'success');
                     DB.deleteOldSchedules(schedulePayload.date);
+                    // 数据库成功，同时通过 ntfy 广播给教师端
+                    fetch('https://ntfy.sh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            topic: 'wh12z213_schedule',
+                            message: JSON.stringify(schedulePayload),
+                            title: '作业时间表',
+                            tags: ['schedule']
+                        })
+                    }).catch(function(err) {
+                        console.warn('ntfy广播作业时间表失败:', err);
+                    });
                 } else {
-                    showScheduleStatus('数据库保存失败，已通过ntfy发送', 'error');
+                    // 数据库10次重试全部失败，改用 ntfy.sh 上传
+                    showScheduleStatus('数据库上传失败（已重试10次），正在通过ntfy发送…', 'error');
+                    fetch('https://ntfy.sh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            topic: 'wh12z213_schedule',
+                            message: JSON.stringify(schedulePayload),
+                            title: '作业时间表',
+                            tags: ['schedule']
+                        })
+                    }).then(function() {
+                        showScheduleStatus('已通过ntfy.sh发送时间表', 'success');
+                    }).catch(function(err) {
+                        console.warn('ntfy上传作业时间表失败:', err);
+                        showScheduleStatus('时间表上传失败（数据库和ntfy均失败）', 'error');
+                    });
                 }
             }).catch(function(e) {
-                console.warn('数据库保存失败:', e);
-            });
-            // 同时通过 ntfy 广播（作为备用）
-            fetch('https://ntfy.sh', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    topic: 'wh12z213_schedule',
-                    message: JSON.stringify(schedulePayload),
-                    title: '作业时间表',
-                    tags: ['schedule']
-                })
-            }).catch(function(err) {
-                console.warn('广播作业时间表失败:', err);
+                console.warn('数据库保存异常:', e);
+                // 异常情况也走 ntfy 备用
+                showScheduleStatus('数据库异常，正在通过ntfy发送…', 'error');
+                fetch('https://ntfy.sh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        topic: 'wh12z213_schedule',
+                        message: JSON.stringify(schedulePayload),
+                        title: '作业时间表',
+                        tags: ['schedule']
+                    })
+                }).then(function() {
+                    showScheduleStatus('已通过ntfy.sh发送时间表', 'success');
+                }).catch(function(err) {
+                    showScheduleStatus('时间表上传失败', 'error');
+                });
             });
         }
 
@@ -2994,12 +3074,19 @@
     <a href="https://www.wenjuan.com/s/YVVRJbz/" target="_blank" class="feedback-btn">💬 问题反馈</a>
 
     <!-- 版本号标注 -->
-    <div class="version-label">当前版本：v1.5.3</div>
+    <div class="version-label">当前版本：v1.5.4</div>
 
     <!-- 更新历史弹窗 -->
     <div id="changelogOverlay" class="changelog-overlay hidden">
         <div class="changelog-panel">
             <h2>📜 晚自习计时系统 — 更新历史<button class="changelog-close" onclick="hideChangelog()">&times;</button></h2>
+
+            <h3>v1.5.4</h3>
+            <ul>
+                <li>时间表上传数据库增加重试机制：最多重试10次，每次超时20秒</li>
+                <li>10次重试全部失败后自动改用 ntfy.sh 上传</li>
+                <li>上传过程显示实时状态提示</li>
+            </ul>
 
             <h3>v1.5.3</h3>
             <ul>
