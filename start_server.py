@@ -320,110 +320,194 @@ def show_shutdown_countdown():
         traceback.print_exc()
 
 def show_shutdown_countdown_impl():
-    """关机倒计时窗口实现（tkinter）— 醒目闪烁效果"""
+    """关机倒计时窗口实现（tkinter）— 全屏醒目闪烁 + 蜂鸣音 + 脉动动画"""
     import tkinter as tk
+    import math
+
+    # 获取屏幕尺寸（全屏覆盖）
+    screen_w = None
+    screen_h = None
+    try:
+        temp_root = tk.Tk()
+        screen_w = temp_root.winfo_screenwidth()
+        screen_h = temp_root.winfo_screenheight()
+        temp_root.destroy()
+    except:
+        screen_w, screen_h = 1920, 1080
 
     root = tk.Tk()
     root.title("⚠️ 放学提醒")
-    root.geometry("520x400")
-    root.resizable(False, False)
-    root.attributes('-topmost', True)  # 置顶显示
-    root.configure(bg='#1a1a2e')
+    root.geometry(f"{screen_w}x{screen_h}+0+0")
+    root.overrideredirect(True)       # 无边框全屏
+    root.attributes('-topmost', True)  # 置顶
+    root.configure(bg='#0a0a0f')
 
-    # 居中显示
-    root.update_idletasks()
-    x = (root.winfo_screenwidth() - 520) // 2
-    y = (root.winfo_screenheight() - 400) // 2
-    root.geometry(f"520x400+{x}+{y}")
+    # ===== 闪烁颜色对 =====
+    COLORS_BRIGHT = {
+        'bg': '#dc2626',       # 亮红背景
+        'banner': '#ef4444',
+        'banner_text': '#ffffff',
+        'circle': '#dc2626',
+        'circle_outline': '#fde047',
+        'num': '#ffffff',
+        'btn_fill': '#FF1493',
+        'btn_glow': '#fde047',
+        'sub': '#fef3c7',
+        'progress': '#fde047',
+    }
+    COLORS_DARK = {
+        'bg': '#0a0a0f',       # 暗色背景
+        'banner': '#7f1d1d',
+        'banner_text': '#fecaca',
+        'circle': '#1a1a2e',
+        'circle_outline': '#ef4444',
+        'num': '#fca5a5',
+        'btn_fill': '#831843',
+        'btn_glow': '#FF1493',
+        'sub': '#6b7280',
+        'progress': '#7f1d1d',
+    }
 
-    # ===== 顶部红色闪烁横幅 =====
-    banner_canvas = tk.Canvas(root, width=520, height=70, highlightthickness=0, bg='#1a1a2e')
-    banner_canvas.pack(fill='x')
-    banner_rect = banner_canvas.create_rectangle(0, 0, 520, 70, fill='#dc2626', outline='')
-    banner_text = banner_canvas.create_text(260, 35, text="📚  已放学",
-                                              fill='white', font=('Microsoft YaHei', 28, 'bold'))
+    # ===== 主画布（全屏） =====
+    canvas = tk.Canvas(root, width=screen_w, height=screen_h, highlightthickness=0, bg='#0a0a0f')
+    canvas.pack(fill='both', expand=True)
 
-    # ===== 倒计时大数字 =====
-    countdown_canvas = tk.Canvas(root, width=520, height=130, highlightthickness=0, bg='#1a1a2e')
-    countdown_canvas.pack(fill='x', pady=(10, 0))
+    # 坐标辅助
+    cx = screen_w // 2
+    cy = screen_h // 2
 
-    # 倒计时大圆背景
-    circle = countdown_canvas.create_oval(180, 5, 340, 130, fill='#dc2626', outline='#fca5a5', width=3)
-    countdown_num = countdown_canvas.create_text(260, 67, text=str(SHUTDOWN_COUNTDOWN),
-                                                    fill='white', font=('Microsoft YaHei', 52, 'bold'))
+    # ===== 顶部横幅 =====
+    banner_h = 120
+    banner_rect = canvas.create_rectangle(0, cy - 280, screen_w, cy - 280 + banner_h, fill='#dc2626', outline='')
+    banner_text = canvas.create_text(cx, cy - 220, text="📚  已放学",
+                                      fill='white', font=('Microsoft YaHei', 48, 'bold'))
 
-    # 副文字
-    sub_label = tk.Label(root, text="秒后电脑将自动关机", font=('Microsoft YaHei', 14),
-                         fg='#cbd5e1', bg='#1a1a2e')
-    sub_label.pack(pady=(2, 5))
+    # ===== 倒计时大圆（脉动缩放） =====
+    base_r = 120
+    circle_x1 = cx - base_r
+    circle_y1 = cy - 100
+    circle_x2 = cx + base_r
+    circle_y2 = cy + 140
+    circle = canvas.create_oval(circle_x1, circle_y1, circle_x2, circle_y2,
+                                 fill='#dc2626', outline='#fde047', width=5)
+    countdown_num = canvas.create_text(cx, cy + 20, text=str(SHUTDOWN_COUNTDOWN),
+                                        fill='white', font=('Microsoft YaHei', 96, 'bold'))
 
-    # ===== 取消按钮（大号粉色圆角，带闪烁发光边框） =====
-    btn_canvas = tk.Canvas(root, width=360, height=80, highlightthickness=0, bg='#1a1a2e', cursor='hand2')
-    btn_canvas.pack(pady=(5, 0))
+    # ===== 副文字 =====
+    sub_text = canvas.create_text(cx, cy + 180, text="秒后电脑将自动关机",
+                                   fill='#fef3c7', font=('Microsoft YaHei', 22))
 
-    def draw_rounded_rect(canvas, x1, y1, x2, y2, r=20, **kwargs):
-        """绘制圆角矩形"""
-        points = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r,
-                  x2, y2-r, x2, y2, x2-r, y2,
-                  x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
-        return canvas.create_polygon(points, smooth=True, **kwargs)
+    # ===== 进度条 =====
+    bar_w = min(screen_w - 200, 600)
+    bar_x1 = cx - bar_w // 2
+    bar_x2 = cx + bar_w // 2
+    bar_y1 = cy + 220
+    bar_y2 = cy + 240
+    bar_bg = canvas.create_rectangle(bar_x1, bar_y1, bar_x2, bar_y2, fill='#1a1a2e', outline='#374151', width=2)
+    bar_fill = canvas.create_rectangle(bar_x1, bar_y1, bar_x2, bar_y2, fill='#fde047', outline='')
 
-    # 发光边框层（外层，会闪烁）
-    glow_rect = draw_rounded_rect(btn_canvas, 2, 2, 358, 78, r=22, fill='', outline='#FF6B9D', width=4)
-    # 按钮主体
-    btn_rect = draw_rounded_rect(btn_canvas, 6, 6, 354, 74, r=20, fill='#FF1493', outline='')
-    btn_text = btn_canvas.create_text(180, 40, text=f"✋ 取消关机（{SHUTDOWN_COUNTDOWN}s）",
-                                       fill='white', font=('Microsoft YaHei', 18, 'bold'))
+    # ===== 取消按钮（大号粉色圆角 + 发光边框） =====
+    btn_w, btn_h = 420, 90
+    btn_x1 = cx - btn_w // 2
+    btn_y1 = cy + 280
+    btn_x2 = cx + btn_w // 2
+    btn_y2 = btn_y1 + btn_h
 
+    def draw_rounded_rect(c, x1, y1, x2, y2, r=24, **kw):
+        pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r,
+               x2, y2-r, x2, y2, x2-r, y2,
+               x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        return c.create_polygon(pts, smooth=True, **kw)
+
+    # 外发光层（3层渐变光晕）
+    glow3 = draw_rounded_rect(canvas, btn_x1-8, btn_y1-8, btn_x2+8, btn_y2+8, r=30, fill='', outline='#FF6B9D', width=2)
+    glow2 = draw_rounded_rect(canvas, btn_x1-5, btn_y1-5, btn_x2+5, btn_y2+5, r=28, fill='', outline='#FF1493', width=3)
+    glow1 = draw_rounded_rect(canvas, btn_x1-2, btn_y1-2, btn_x2+2, btn_y2+2, r=26, fill='', outline='#fde047', width=4)
+    btn_rect = draw_rounded_rect(canvas, btn_x1, btn_y1, btn_x2, btn_y2, r=24, fill='#FF1493', outline='')
+    btn_text = canvas.create_text(cx, btn_y1 + btn_h // 2,
+                                   text=f"✋  取消关机（{SHUTDOWN_COUNTDOWN}s）",
+                                   fill='white', font=('Microsoft YaHei', 26, 'bold'))
+
+    # ===== 状态变量 =====
     remaining = [SHUTDOWN_COUNTDOWN]
     shutdown_cancelled = [False]
-    flash_state = [0]  # 闪烁状态：0/1 交替
+    flash_state = [0]
+    pulse_phase = [0.0]  # 脉动相位
 
-    # ===== 闪烁动画线程函数 =====
+    # ===== 系统蜂鸣音（Windows） =====
+    def beep():
+        if sys.platform == 'win32':
+            try:
+                import winsound
+                winsound.Beep(1000, 150)  # 1000Hz, 150ms
+            except:
+                pass
+
+    # ===== 闪烁循环（300ms 切换，最后10秒 150ms） =====
     def flash_loop():
-        """高频闪烁（每500ms切换）"""
         if shutdown_cancelled[0]:
             return
         flash_state[0] = 1 - flash_state[0]
-        if flash_state[0]:
-            # 亮色
-            banner_canvas.itemconfig(banner_rect, fill='#dc2626')
-            banner_canvas.itemconfig(banner_text, fill='white')
-            countdown_canvas.itemconfig(circle, fill='#dc2626', outline='#fca5a5')
-            countdown_canvas.itemconfig(countdown_num, fill='white')
-            btn_canvas.itemconfig(glow_rect, outline='#FF6B9D', width=4)
-            btn_canvas.itemconfig(btn_rect, fill='#FF1493')
-            root.configure(bg='#1a1a2e')
-        else:
-            # 暗色
-            banner_canvas.itemconfig(banner_rect, fill='#7f1d1d')
-            banner_canvas.itemconfig(banner_text, fill='#fecaca')
-            countdown_canvas.itemconfig(circle, fill='#7f1d1d', outline='#ef4444')
-            countdown_canvas.itemconfig(countdown_num, fill='#fca5a5')
-            btn_canvas.itemconfig(glow_rect, outline='#FF69B4', width=6)
-            btn_canvas.itemconfig(btn_rect, fill='#C71585')
-            root.configure(bg='#0f0f1e')
-        root.after(500, flash_loop)
+        is_urgent = remaining[0] <= 10
+        colors = COLORS_BRIGHT if flash_state[0] else COLORS_DARK
+
+        root.configure(bg=colors['bg'])
+        canvas.configure(bg=colors['bg'])
+
+        canvas.itemconfig(banner_rect, fill=colors['banner'])
+        canvas.itemconfig(banner_text, fill=colors['banner_text'])
+        canvas.itemconfig(circle, fill=colors['circle'], outline=colors['circle_outline'])
+        canvas.itemconfig(countdown_num, fill=colors['num'])
+        canvas.itemconfig(sub_text, fill=colors['sub'])
+        canvas.itemconfig(bar_fill, fill=colors['progress'])
+        canvas.itemconfig(glow1, outline=colors['btn_glow'])
+        canvas.itemconfig(btn_rect, fill=colors['btn_fill'])
+
+        # 最后10秒：数字变黄 + 更快闪烁
+        if is_urgent and flash_state[0]:
+            canvas.itemconfig(countdown_num, fill='#fde047')
+            canvas.itemconfig(circle, outline='#ffffff', width=8)
+
+        interval = 150 if is_urgent else 300
+        root.after(interval, flash_loop)
+
+    # ===== 脉动缩放动画（倒计时圆每秒呼吸） =====
+    def pulse_loop():
+        if shutdown_cancelled[0]:
+            return
+        pulse_phase[0] += 0.15
+        scale = 1.0 + 0.06 * math.sin(pulse_phase[0])
+        r = int(base_r * scale)
+        canvas.coords(circle, cx - r, circle_y1 - (r - base_r), cx + r, circle_y2 + (r - base_r))
+        root.after(50, pulse_loop)
 
     # ===== 倒计时更新（每秒） =====
     def update_countdown():
-        """每秒更新倒计时数字"""
         if shutdown_cancelled[0]:
             return
         if remaining[0] <= 0:
-            sub_label.config(text="正在关机...", fg='#ef4444')
+            canvas.itemconfig(countdown_num, text="关机")
+            canvas.itemconfig(sub_text, text="正在关闭电脑...", fill='#ef4444')
             root.after(300, do_shutdown)
             return
-        countdown_canvas.itemconfig(countdown_num, text=str(remaining[0]))
-        btn_canvas.itemconfig(btn_text, text=f"✋ 取消关机（{remaining[0]}s）")
+
+        canvas.itemconfig(countdown_num, text=str(remaining[0]))
+        canvas.itemconfig(btn_text, text=f"✋  取消关机（{remaining[0]}s）")
+
+        # 进度条：按比例缩短
+        progress_ratio = remaining[0] / SHUTDOWN_COUNTDOWN
+        new_x2 = bar_x1 + int((bar_x2 - bar_x1) * progress_ratio)
+        canvas.coords(bar_fill, bar_x1, bar_y1, new_x2, bar_y2)
+
+        # 最后10秒：数字放大 + 蜂鸣
+        if remaining[0] <= 10:
+            canvas.itemconfig(countdown_num, font=('Microsoft YaHei', 110, 'bold'))
+            beep()
+
         remaining[0] -= 1
-        # 最后10秒：倒计时数字放大 + 变黄
-        if remaining[0] < 10:
-            countdown_canvas.itemconfig(countdown_num, font=('Microsoft YaHei', 58, 'bold'))
         root.after(1000, update_countdown)
 
     def do_shutdown():
-        """执行关机"""
         if shutdown_cancelled[0]:
             return
         print("[关机] 倒计时结束，正在关闭电脑...")
@@ -434,28 +518,35 @@ def show_shutdown_countdown_impl():
             os.system('poweroff')
 
     def cancel_shutdown():
-        """取消关机"""
         shutdown_cancelled[0] = True
         print("[关机] 用户取消了关机")
         root.destroy()
 
-    # 按钮点击事件（绑定所有元素）
-    for item in (glow_rect, btn_rect, btn_text):
-        btn_canvas.tag_bind(item, '<Button-1>', lambda e: cancel_shutdown())
+    # 按钮点击（绑定所有元素）
+    for item in (glow1, glow2, glow3, btn_rect, btn_text):
+        canvas.tag_bind(item, '<Button-1>', lambda e: cancel_shutdown())
+    # 点击空白处也可取消
+    canvas.bind('<Button-1>', lambda e: cancel_shutdown())
+    # ESC 键取消
+    root.bind('<Escape>', lambda e: cancel_shutdown())
 
     # 按钮悬停效果
     def on_enter(event):
-        btn_canvas.itemconfig(btn_rect, fill='#FF1744')
-        btn_canvas.itemconfig(glow_rect, width=7)
+        canvas.itemconfig(btn_rect, fill='#FF1744')
+        for g in (glow1, glow2, glow3):
+            canvas.itemconfig(g, width=6)
     def on_leave(event):
-        btn_canvas.itemconfig(btn_rect, fill='#FF1493')
-        btn_canvas.itemconfig(glow_rect, width=4)
-    for item in (glow_rect, btn_rect, btn_text):
-        btn_canvas.tag_bind(item, '<Enter>', on_enter)
-        btn_canvas.tag_bind(item, '<Leave>', on_leave)
+        canvas.itemconfig(btn_rect, fill='#FF1493')
+        canvas.itemconfig(glow1, width=4)
+        canvas.itemconfig(glow2, width=3)
+        canvas.itemconfig(glow3, width=2)
+    for item in (glow1, glow2, glow3, btn_rect, btn_text):
+        canvas.tag_bind(item, '<Enter>', on_enter)
+        canvas.tag_bind(item, '<Leave>', on_leave)
 
-    # 启动闪烁 + 倒计时
+    # 启动所有动画
     flash_loop()
+    pulse_loop()
     update_countdown()
     root.mainloop()
 
