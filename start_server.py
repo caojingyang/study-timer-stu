@@ -35,7 +35,13 @@ SUPABASE_KEY = 'sb_publishable_x0V-7Mj0PyphcH0W2cID0A_W-yUfdME'
 HEARTBEAT_INTERVAL = 30  # 秒
 CLEANUP_INTERVAL = 1800  # 数据库清理间隔（秒），30分钟
 APP_NAME = "晚自习系统"  # 开机自启注册名
-APP_VERSION = "v2.8.2"
+APP_VERSION = "v2.9.0"
+
+# 放学自动关机配置
+SCHOOL_END_HOUR = 21       # 放学时间：21:45
+SCHOOL_END_MINUTE = 45
+SHUTDOWN_DELAY_MIN = 1     # 放学后1分钟触发
+SHUTDOWN_COUNTDOWN = 60    # 关机倒计时（秒）
 
 # ============================================================
 # 路径工具
@@ -295,6 +301,148 @@ def cleanup_loop():
         except Exception as e:
             print(f"[清理] 清理异常: {e}")
         time.sleep(CLEANUP_INTERVAL)
+
+# ============================================================
+# 放学自动关机
+# ============================================================
+def get_today_schedule_exists():
+    """检查今日是否有晚自习时间表（避免非晚自习日触发关机）"""
+    today = datetime.date.today().isoformat()
+    result = sb_request('GET', f'/rest/v1/schedules?date=eq.{today}&select=date&limit=1')
+    return bool(result)
+
+def show_shutdown_countdown():
+    """显示放学关机倒计时窗口（置顶显示）"""
+    try:
+        show_shutdown_countdown_impl()
+    except Exception as e:
+        print(f"[关机] 倒计时窗口异常: {e}")
+        traceback.print_exc()
+
+def show_shutdown_countdown_impl():
+    """关机倒计时窗口实现（tkinter）"""
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.title("放学提醒")
+    root.geometry("420x300")
+    root.resizable(False, False)
+    root.attributes('-topmost', True)  # 置顶显示
+    root.configure(bg='white')
+
+    # 居中显示
+    root.update_idletasks()
+    x = (root.winfo_screenwidth() - 420) // 2
+    y = (root.winfo_screenheight() - 300) // 2
+    root.geometry(f"420x300+{x}+{y}")
+
+    # 标题：已放学
+    tk.Label(root, text="📚 已放学", font=('Microsoft YaHei', 26, 'bold'),
+             fg='#1e293b', bg='white').pack(pady=(35, 5))
+
+    # 副标题
+    tk.Label(root, text="晚自习已结束", font=('Microsoft YaHei', 12),
+             fg='#64748b', bg='white').pack(pady=(0, 5))
+
+    # 倒计时文字
+    countdown_var = tk.StringVar(value=f"电脑将在 {SHUTDOWN_COUNTDOWN}s 后自动关机")
+    tk.Label(root, textvariable=countdown_var,
+             font=('Microsoft YaHei', 16, 'bold'), fg='#ef4444', bg='white').pack(pady=10)
+
+    # 圆角矩形粉色取消按钮
+    btn_canvas = tk.Canvas(root, width=220, height=56, highlightthickness=0, bg='white', cursor='hand2')
+    btn_canvas.pack(pady=10)
+
+    def draw_rounded_rect(canvas, x1, y1, x2, y2, r=18, **kwargs):
+        """绘制圆角矩形"""
+        points = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r,
+                  x2, y2-r, x2, y2, x2-r, y2,
+                  x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        return canvas.create_polygon(points, smooth=True, **kwargs)
+
+    remaining = [SHUTDOWN_COUNTDOWN]
+    shutdown_cancelled = [False]
+
+    # 绘制粉色圆角按钮
+    btn_rect = draw_rounded_rect(btn_canvas, 5, 5, 215, 51, r=18, fill='#FF6B9D', outline='')
+    btn_text = btn_canvas.create_text(110, 28, text=f"取消关机（{SHUTDOWN_COUNTDOWN}s）",
+                                       fill='white', font=('Microsoft YaHei', 14, 'bold'))
+
+    def update_countdown():
+        """每秒更新倒计时"""
+        if shutdown_cancelled[0]:
+            return
+        if remaining[0] <= 0:
+            countdown_var.set("正在关机...")
+            root.after(500, do_shutdown)
+            return
+        countdown_var.set(f"电脑将在 {remaining[0]}s 后自动关机")
+        btn_canvas.itemconfig(btn_text, text=f"取消关机（{remaining[0]}s）")
+        remaining[0] -= 1
+        root.after(1000, update_countdown)
+
+    def do_shutdown():
+        """执行关机"""
+        if shutdown_cancelled[0]:
+            return
+        print("[关机] 倒计时结束，正在关闭电脑...")
+        root.destroy()  # 先关闭窗口
+        if sys.platform == 'win32':
+            os.system('shutdown /s /f /t 0')
+        else:
+            os.system('poweroff')
+
+    def cancel_shutdown():
+        """取消关机"""
+        shutdown_cancelled[0] = True
+        print("[关机] 用户取消了关机")
+        root.destroy()
+
+    # 按钮点击事件
+    btn_canvas.tag_bind(btn_rect, '<Button-1>', lambda e: cancel_shutdown())
+    btn_canvas.tag_bind(btn_text, '<Button-1>', lambda e: cancel_shutdown())
+
+    # 按钮悬停效果
+    def on_enter(event):
+        btn_canvas.itemconfig(btn_rect, fill='#FF4081')
+    def on_leave(event):
+        btn_canvas.itemconfig(btn_rect, fill='#FF6B9D')
+    btn_canvas.tag_bind(btn_rect, '<Enter>', on_enter)
+    btn_canvas.tag_bind(btn_rect, '<Leave>', on_leave)
+
+    # 启动倒计时
+    update_countdown()
+    root.mainloop()
+
+def school_end_monitor():
+    """放学监控线程：放学后1分钟触发关机倒计时窗口"""
+    triggered_date = None  # 记录已触发的日期，每天只触发一次
+    while True:
+        try:
+            now = datetime.datetime.now()
+            today_str = now.date().isoformat()
+
+            # 每天只触发一次
+            if triggered_date != today_str:
+                # 计算触发时间：放学时间 + 1分钟
+                school_end = now.replace(hour=SCHOOL_END_HOUR, minute=SCHOOL_END_MINUTE, second=0, microsecond=0)
+                trigger_time = school_end + datetime.timedelta(minutes=SHUTDOWN_DELAY_MIN)
+
+                if now >= trigger_time:
+                    # 检查今日是否有晚自习时间表
+                    if get_today_schedule_exists():
+                        print(f"[放学] 已过放学时间（{SCHOOL_END_HOUR}:{SCHOOL_END_MINUTE:02d}），"
+                              f"触发关机倒计时（{SHUTDOWN_COUNTDOWN}s）")
+                        triggered_date = today_str
+                        show_shutdown_countdown()
+                    else:
+                        # 今日无时间表，跳过关机
+                        triggered_date = today_str
+                        print(f"[放学] 今日无晚自习时间表，跳过自动关机")
+        except Exception as e:
+            print(f"[放学] 监控异常: {e}")
+
+        time.sleep(10)  # 每10秒检查一次
 
 # ============================================================
 # 文件下载
@@ -910,6 +1058,12 @@ def main():
     cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
     cleanup_thread.start()
     print("[清理] 数据库过期数据清理已启动（每30分钟）")
+
+    # 启动放学自动关机监控线程
+    shutdown_thread = threading.Thread(target=school_end_monitor, daemon=True)
+    shutdown_thread.start()
+    print(f"[放学] 放学自动关机监控已启动（{SCHOOL_END_HOUR}:{SCHOOL_END_MINUTE:02d} "
+          f"后{SHUTDOWN_DELAY_MIN}分钟触发，倒计时{SHUTDOWN_COUNTDOWN}s）")
 
     # 启动 HTTP 服务器
     httpd = http.server.HTTPServer(('0.0.0.0', PORT), CORSHandler)
