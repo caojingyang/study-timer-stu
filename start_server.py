@@ -33,8 +33,9 @@ PORT = 8080
 SUPABASE_URL = 'https://pylcqbwhyqozvpwfzgiy.supabase.co'
 SUPABASE_KEY = 'sb_publishable_x0V-7Mj0PyphcH0W2cID0A_W-yUfdME'
 HEARTBEAT_INTERVAL = 30  # 秒
+CLEANUP_INTERVAL = 1800  # 数据库清理间隔（秒），30分钟
 APP_NAME = "晚自习系统"  # 开机自启注册名
-APP_VERSION = "v2.8.1"
+APP_VERSION = "v2.8.2"
 
 # ============================================================
 # 路径工具
@@ -188,6 +189,112 @@ def get_pending_files():
 def delete_pending_file(file_id):
     """删除已下载的待接收文件记录"""
     sb_request('DELETE', '/rest/v1/pending_files?id=eq.' + str(file_id))
+
+# ============================================================
+# 数据库过期数据清理
+# ============================================================
+def sb_delete_by_filter(table, filter_str):
+    """删除满足条件的记录"""
+    sb_request('DELETE', f'/rest/v1/{table}?{filter_str}')
+
+def sb_get_all(table, select='*'):
+    """获取表中所有记录"""
+    result = sb_request('GET', f'/rest/v1/{table}?select={select}')
+    return result if result else []
+
+def cleanup_expired_data():
+    """清理数据库中的过期数据（不影响文件接收和心跳功能）"""
+    now = datetime.datetime.now()
+    now_iso = now.isoformat()
+    errors = []
+
+    # 1. 清理过期验证码（verify_codes 表）
+    try:
+        codes = sb_get_all('verify_codes')
+        for code in codes:
+            if code.get('expires_at') and datetime.datetime.fromisoformat(code['expires_at'].replace('Z', '+00:00')).replace(tzinfo=None) < now:
+                sb_delete_by_filter('verify_codes', 'id=eq.' + str(code['id']))
+    except Exception as e:
+        errors.append(f'verify_codes: {e}')
+
+    # 2. 清理过期密码重置链接（reset_tokens 表）
+    try:
+        tokens = sb_get_all('reset_tokens')
+        for token in tokens:
+            if token.get('expires_at') and datetime.datetime.fromisoformat(token['expires_at'].replace('Z', '+00:00')).replace(tzinfo=None) < now:
+                sb_delete_by_filter('reset_tokens', 'id=eq.' + str(token['id']))
+    except Exception as e:
+        errors.append(f'reset_tokens: {e}')
+
+    # 3. 清理超过90天的发送通知历史（notification_history 表）
+    try:
+        cutoff_90d = (now - datetime.timedelta(days=90)).isoformat()
+        # 使用 lt 操作符：created_at < cutoff
+        sb_delete_by_filter('notification_history', f'created_at=lt.{cutoff_90d}')
+    except Exception as e:
+        errors.append(f'notification_history: {e}')
+
+    # 4. 清理超过90天的文件发送历史（file_transfer_history 表）
+    try:
+        cutoff_90d_fth = (now - datetime.timedelta(days=90)).isoformat()
+        sb_delete_by_filter('file_transfer_history', f'created_at=lt.{cutoff_90d_fth}')
+    except Exception as e:
+        errors.append(f'file_transfer_history: {e}')
+
+    # 5. 清理已下载的待发送文件及超过90天的待发送文件（pending_files 表）
+    #    注意：不清理未下载且未过期的文件，避免丢失待接收文件
+    try:
+        cutoff_90d_pf = (now - datetime.timedelta(days=90)).isoformat()
+        # 删除已下载的记录
+        sb_delete_by_filter('pending_files', 'downloaded=eq.true')
+        # 删除超过90天的记录
+        sb_delete_by_filter('pending_files', f'created_at=lt.{cutoff_90d_pf}')
+    except Exception as e:
+        errors.append(f'pending_files: {e}')
+
+    # 6. 清理大屏心跳表（screen_heartbeat）
+    #    - 删除多余行（id != 1）
+    #    - 若心跳超过24小时，删除该行
+    try:
+        hb_rows = sb_get_all('screen_heartbeat')
+        hb_cutoff = (now - datetime.timedelta(hours=24)).isoformat()
+        for hb in hb_rows:
+            if hb.get('id') != 1:
+                sb_delete_by_filter('screen_heartbeat', 'id=eq.' + str(hb['id']))
+            elif hb.get('last_heartbeat') and hb['last_heartbeat'] < hb_cutoff:
+                sb_delete_by_filter('screen_heartbeat', 'id=eq.' + str(hb['id']))
+    except Exception as e:
+        errors.append(f'screen_heartbeat: {e}')
+
+    # 7. 清理超过90天的登录记录（login_records 表）
+    try:
+        cutoff_90d_lr = (now - datetime.timedelta(days=90)).isoformat()
+        sb_delete_by_filter('login_records', f'created_at=lt.{cutoff_90d_lr}')
+    except Exception as e:
+        errors.append(f'login_records: {e}')
+
+    # 8. 清理超过90天的修改请求记录（modify_requests 表）
+    try:
+        cutoff_90d_mr = (now - datetime.timedelta(days=90)).isoformat()
+        sb_delete_by_filter('modify_requests', f'created_at=lt.{cutoff_90d_mr}')
+    except Exception as e:
+        errors.append(f'modify_requests: {e}')
+
+    if errors:
+        print(f"[清理] 部分清理失败: {'; '.join(errors)}")
+    else:
+        print(f"[清理] 过期数据清理完成 ({now.strftime('%Y-%m-%d %H:%M:%S')})")
+
+def cleanup_loop():
+    """数据库清理循环线程（每30分钟执行一次）"""
+    # 首次启动延迟60秒，避免与其他启动任务竞争
+    time.sleep(60)
+    while True:
+        try:
+            cleanup_expired_data()
+        except Exception as e:
+            print(f"[清理] 清理异常: {e}")
+        time.sleep(CLEANUP_INTERVAL)
 
 # ============================================================
 # 文件下载
@@ -798,6 +905,11 @@ def main():
     pending_thread = threading.Thread(target=pending_files_loop, daemon=True)
     pending_thread.start()
     print("[轮询] 数据库文件轮询已启动（每5秒）")
+
+    # 启动数据库清理线程（每30分钟清理过期数据）
+    cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
+    cleanup_thread.start()
+    print("[清理] 数据库过期数据清理已启动（每30分钟）")
 
     # 启动 HTTP 服务器
     httpd = http.server.HTTPServer(('0.0.0.0', PORT), CORSHandler)
