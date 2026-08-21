@@ -492,12 +492,13 @@
     </div>
 
     <script>
-        // ==================== Supabase 数据库配置 ====================
-        const SUPABASE_URL = 'https://wh12z213stu.pages.dev/api/supabase';
+        // ==================== CloudBase 数据库配置 ====================
+        // 通过 Cloudflare Pages Worker 代理访问腾讯 CloudBase PostgreSQL（PostgREST 兼容）
+        const CB_API_URL = 'https://wh12z213stu.pages.dev/api/supabase';
 
-        // Supabase REST API 通用封装（通过 REST API 直连，无需加载 SDK）
+        // CloudBase REST API 通用封装（通过 REST API 直连，无需加载 SDK）
         function sbRest(table, method, body) {
-            var url = SUPABASE_URL + '/rest/v1/' + table;
+            var url = CB_API_URL + '/rest/v1/' + table;
             var opts = {
                 method: method || 'GET',
                 headers: {
@@ -508,14 +509,14 @@
                 opts.body = JSON.stringify(body);
             }
             return fetch(url, opts).then(function(r) {
-                if (!r.ok) throw new Error('Supabase REST error: ' + r.status);
+                if (!r.ok) throw new Error('CloudBase REST error: ' + r.status);
                 return r.json();
             });
         }
 
         // GET 查询：sbGet(table, filterCol, filterVal, selectCols)
         function sbGet(table, filterCol, filterVal, selectCols) {
-            var url = SUPABASE_URL + '/rest/v1/' + table + (filterCol ? '?' + filterCol + '=eq.' + encodeURIComponent(filterVal) : '');
+            var url = CB_API_URL + '/rest/v1/' + table + (filterCol ? '?' + filterCol + '=eq.' + encodeURIComponent(filterVal) : '');
             if (selectCols) url += (filterCol ? '&' : '?') + 'select=' + selectCols;
             return fetch(url, {
                 headers: {
@@ -540,7 +541,7 @@
 
         // 更新（PATCH）：sbUpdate(table, filterCol, filterVal, updates)
         function sbUpdate(table, filterCol, filterVal, updates) {
-            var url = SUPABASE_URL + '/rest/v1/' + table + '?' + filterCol + '=eq.' + encodeURIComponent(filterVal);
+            var url = CB_API_URL + '/rest/v1/' + table + '?' + filterCol + '=eq.' + encodeURIComponent(filterVal);
             return fetch(url, {
                 method: 'PATCH',
                 headers: {
@@ -555,7 +556,7 @@
         function sbDelete(table, filterCol, filterVal) {
             var match = /^(eq|neq|gt|gte|lt|lte|like|ilike|in|is|cs|cd)\.(.*)$/.exec(filterVal);
             var filterExpr = match ? (match[1] + '.' + encodeURIComponent(match[2])) : ('eq.' + encodeURIComponent(filterVal));
-            var url = SUPABASE_URL + '/rest/v1/' + table + '?' + filterCol + '=' + filterExpr;
+            var url = CB_API_URL + '/rest/v1/' + table + '?' + filterCol + '=' + filterExpr;
             return fetch(url, {
                 method: 'DELETE',
                 headers: {
@@ -589,13 +590,13 @@
                 };
                 var self = this;
                 // 查询是否存在（带超时）
-                var queryUrl = SUPABASE_URL + '/rest/v1/schedules?date=eq.' + encodeURIComponent(date) + '&select=id';
+                var queryUrl = CB_API_URL + '/rest/v1/schedules?date=eq.' + encodeURIComponent(date) + '&select=id';
                 return self._fetchWithTimeout(queryUrl, { headers: { 'Content-Type': 'application/json' } }, 20000).then(function(data) {
                     var existing = (data && data.length > 0) ? data[0] : null;
                     var fullPayload = Object.assign({}, payload, { updated_at: new Date().toISOString() });
                     if (existing && existing.id) {
                         // 更新（带超时）
-                        var updateUrl = SUPABASE_URL + '/rest/v1/schedules?id=eq.' + encodeURIComponent(existing.id);
+                        var updateUrl = CB_API_URL + '/rest/v1/schedules?id=eq.' + encodeURIComponent(existing.id);
                         return self._fetchWithTimeout(updateUrl, {
                             method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
@@ -604,7 +605,7 @@
                     } else {
                         // 插入（带超时）
                         var insertPayload = Object.assign({}, fullPayload, { created_at: new Date().toISOString() });
-                        return self._fetchWithTimeout(SUPABASE_URL + '/rest/v1/schedules', {
+                        return self._fetchWithTimeout(CB_API_URL + '/rest/v1/schedules', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(insertPayload)
@@ -654,7 +655,7 @@
             },
             // 查询所有 pending 修改请求（按 created_at 降序）
             getPendingModifyRequests: function() {
-                var url = SUPABASE_URL + '/rest/v1/modify_requests?status=eq.pending&order=created_at.desc';
+                var url = CB_API_URL + '/rest/v1/modify_requests?status=eq.pending&order=created_at.desc';
                 return fetch(url, {
                     headers: {
                         'Content-Type': 'application/json'
@@ -1725,7 +1726,7 @@
             // 广播作业时间表到教师端（通过 ntfy JSON API）
             broadcastSchedule();
 
-            // 启动教师端修改请求监听（ntfy SSE 唯一通道，不再轮询 Supabase 表）
+            // 启动教师端修改请求监听（ntfy SSE 唯一通道，不再轮询 CloudBase 表）
             initModifyRequestSubscription();
         }
 
