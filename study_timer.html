@@ -1,0 +1,3259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高二（13）班专属计时系统</title>
+    <link href="tailwind.min.css?v=2" rel="stylesheet">
+    <link href="font-awesome.min.css?v=2" rel="stylesheet">
+    <style>
+        /* ===== 触摸/点击响应速度优化（适配教室大屏） ===== */
+
+        /* 1. 全局触摸优化 */
+        * {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
+        html, body {
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* 7. 所有按钮类元素禁用双击缩放，保证即时响应（含可滚动区域 editMode 内的按钮） */
+        button, .feedback-btn, .triangle-btn, .noise-report-close-btn, .changelog-btn,
+        .menu-btn, .modify-task-btn, .adjust-circle-btn, .notification-ack-btn,
+        .notification-list-btn, .glass-effect {
+            touch-action: manipulation;
+        }
+
+        /* 2. 超快过渡（覆盖原有 0.3s，改为 0.05s） */
+        .menu-btn, .modify-task-btn, .adjust-circle-btn, .notification-ack-btn,
+        .notification-list-btn, .changelog-btn, .feedback-btn, .noise-report-close-btn,
+        .triangle-btn {
+            transition: all 0.05s ease !important;
+        }
+
+        /* 3. 为缺少 :active 状态的按钮补充按压反馈 */
+        .triangle-btn:active { opacity: 0.8; }
+        .noise-report-close-btn:active { transform: scale(0.95); }
+        .feedback-btn:active { transform: scale(0.95); }
+        .glass-effect:active { background: rgba(255, 255, 255, 0.25); }
+
+        /* 4. 数字键盘按钮优化 */
+        .num-keyboard button {
+            transition: transform 0.05s ease, background-color 0.05s ease !important;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .num-keyboard button:active {
+            transform: scale(0.92);
+        }
+    </style>
+</head>
+<body class="min-h-screen overflow-hidden">
+    <!-- 数据库状态提示 toast（页面顶部，4 秒消失） -->
+    <div class="db-status-toast" id="dbStatusToast" style="position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99999;padding:0.5rem 1rem;background:#3b82f6;color:#fff;border-radius:0 0 0.5rem 0.5rem;font-size:0.85rem;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.15);">
+        <span id="dbStatusText"></span>
+    </div>
+
+    <!-- 背景图片 -->
+    <div class="fixed inset-0 -z-10">
+        <img src="background.png" alt="背景" class="w-full h-full object-cover blur-xl">
+    </div>
+
+    <!-- ========== 主菜单 ========== -->
+    <div id="mainMenu" class="min-h-screen flex flex-col items-center justify-center p-8">
+        <div class="flex items-center gap-4 mb-16">
+            <img src="icon.jpg" alt="图标" class="w-24 h-24 rounded-full shadow-lg">
+            <h1 class="text-4xl font-bold text-white drop-shadow-lg whitespace-nowrap">高二（13）班专属计时系统</h1>
+        </div>
+        <div class="flex flex-col gap-8">
+            <button onclick="showExamMode()" class="menu-btn">
+                <i class="fa fa-clock-o mr-3"></i>考试计时系统
+            </button>
+            <button onclick="showNightStudyMode()" class="menu-btn">
+                <i class="fa fa-moon-o mr-3"></i>晚自习计时系统
+            </button>
+        </div>
+    </div>
+
+    <!-- ========== 考试计时系统 ========== -->
+    <div id="examMode" class="hidden min-h-screen flex flex-col items-center justify-center p-8">
+        <!-- 全屏切换按钮 -->
+        <div class="absolute top-4 left-4">
+            <button id="examFullscreenBtn" onclick="toggleFullscreen()" class="glass-effect text-white px-4 py-2 rounded-lg hover:bg-white/20 transition-all">
+                <i class="fa fa-expand mr-2"></i>
+                <span id="examFullscreenText">进入全屏</span>
+            </button>
+        </div>
+
+        <!-- 返回按钮 -->
+        <div class="absolute top-4 right-4">
+            <button onclick="backToMenu()" class="glass-effect text-white px-4 py-2 rounded-lg hover:bg-white/20 transition-all">
+                <i class="fa fa-arrow-left mr-2"></i>返回
+            </button>
+        </div>
+
+        <!-- 标题栏 -->
+        <div class="absolute top-8 left-1/2 transform -translate-x-1/2 flex items-center gap-4">
+            <img src="icon.jpg" alt="图标" class="w-24 h-24 rounded-full shadow-lg">
+            <h1 class="text-3xl font-bold text-white drop-shadow-lg whitespace-nowrap text-center">高二（13）班考试计时系统</h1>
+        </div>
+
+        <!-- 右下角名言 -->
+        <div class="absolute bottom-8 right-8 quote-card">
+            <p id="examQuote" class="quote-text">今日不肯埋头，明日何以抬头</p>
+        </div>
+
+        <!-- 倒计时显示 -->
+        <div id="examTimerDisplay" class="flex items-center justify-center mb-8">
+            <div class="time-box">
+                <span id="examHours" class="text-9xl font-bold text-white">00</span>
+            </div>
+            <span id="examColon1" class="text-9xl font-bold text-white mx-2">:</span>
+            <div class="time-box">
+                <span id="examMinutes" class="text-9xl font-bold text-white">00</span>
+            </div>
+            <span id="examColonSec" class="text-9xl font-bold text-white mx-2">:</span>
+            <div class="time-box">
+                <span id="examSeconds" class="text-9xl font-bold text-white">00</span>
+            </div>
+        </div>
+
+        <!-- 设置按钮 -->
+        <div id="examSetupArea" class="text-center">
+            <button onclick="openExamDurationModal()" class="menu-btn text-xl px-8 py-3">
+                <i class="fa fa-cog mr-2"></i>设置考试时长
+            </button>
+        </div>
+    </div>
+
+    <!-- 考试时长设置弹窗 -->
+    <div id="examDurationModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-8 w-96 shadow-2xl">
+            <h3 class="text-2xl font-bold text-gray-800 mb-8 text-center">设置考试时长</h3>
+            <div class="flex items-center justify-center gap-6 mb-8">
+                <!-- 时 -->
+                <div class="flex flex-col items-center gap-2">
+                    <button onclick="adjustExamHour(1)" class="triangle-btn">
+                        <div class="triangle-up"></div>
+                    </button>
+                    <span id="examDurationHour" class="text-6xl font-bold text-gray-800">0</span>
+                    <button onclick="adjustExamHour(-1)" class="triangle-btn">
+                        <div class="triangle-down"></div>
+                    </button>
+                    <p class="text-gray-500 text-sm">时</p>
+                </div>
+                <span class="text-4xl font-bold text-gray-400">:</span>
+                <!-- 分 -->
+                <div class="flex flex-col items-center gap-2">
+                    <button onclick="adjustExamMinuteTen(1)" class="triangle-btn">
+                        <div class="triangle-up"></div>
+                    </button>
+                    <div class="flex items-baseline">
+                        <span id="examDurationMinuteTen" class="text-6xl font-bold text-gray-800" style="font-variant-numeric: tabular-nums; display: inline-block; width: 1ch; text-align: center;">0</span>
+                        <span id="examDurationMinuteOne" class="text-6xl font-bold text-gray-800" style="font-variant-numeric: tabular-nums; display: inline-block; width: 1ch; text-align: center;">0</span>
+                    </div>
+                    <button onclick="adjustExamMinuteTen(-1)" class="triangle-btn">
+                        <div class="triangle-down"></div>
+                    </button>
+                    <p class="text-gray-500 text-sm">分</p>
+                </div>
+            </div>
+            <div class="text-right">
+                <button onclick="closeExamDurationModal()" class="mr-3 bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg transition-all">取消</button>
+                <button onclick="startExamTimer()" class="bg-pink-500 hover:bg-pink-600 text-white px-8 py-2 rounded-lg text-lg font-semibold transition-all">Start！</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 晚自习计时系统 ========== -->
+    <!-- 作业编辑模式 -->
+    <div id="editMode" class="hidden min-h-screen p-8 overflow-y-auto" style="max-height:100vh;">
+        <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-center gap-4 mb-8">
+                <img src="icon.jpg" alt="图标" class="w-16 h-16 rounded-full shadow-lg">
+                <h1 class="text-4xl font-bold text-white text-center drop-shadow-lg">高二（13）班高效晚自习</h1>
+            </div>
+
+            <div class="gradient-border p-6 mb-6">
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b-2 border-gray-200">
+                            <th class="py-3 px-4 text-left text-gray-700 font-semibold">序号</th>
+                            <th class="py-3 px-4 text-left text-gray-700 font-semibold">科目</th>
+                            <th class="py-3 px-4 text-left text-gray-700 font-semibold">完成用时</th>
+                            <th class="py-3 px-4 text-left text-gray-700 font-semibold">预计时间</th>
+                            <th class="py-3 px-4 text-left text-gray-700 font-semibold">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="homeworkTable">
+                        <!-- 动态添加的行 -->
+                    </tbody>
+                </table>
+
+                <div class="mt-4 text-center">
+                    <button onclick="addHomeworkRow()" class="bg-primary hover:bg-primary/90 active:bg-primary/80 text-white px-6 py-2 rounded-lg flex items-center gap-2 mx-auto">
+                        <i class="fa fa-plus"></i>
+                        添加作业项目
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center">
+                <button onclick="backToMenu()" class="bg-gray-500 hover:bg-gray-600 active:bg-gray-700 text-white px-6 py-3 rounded-lg text-lg font-semibold shadow-lg transition-all">
+                    <i class="fa fa-arrow-left mr-2"></i>返回主菜单
+                </button>
+                <button onclick="showStartTimeModal()" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white px-8 py-3 rounded-lg text-lg font-semibold shadow-lg transition-all">
+                    <i class="fa fa-save mr-2"></i>
+                    保存作业
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 计时模式 -->
+    <div id="timerMode" class="hidden min-h-screen flex flex-col items-center justify-center p-8">
+        <!-- 全屏切换按钮 -->
+        <div class="absolute top-4 left-4">
+            <button id="fullscreenBtn" onclick="toggleFullscreen()" class="glass-effect text-white px-4 py-2 rounded-lg hover:bg-white/20 transition-all">
+                <i class="fa fa-expand mr-2"></i>
+                <span id="fullscreenText">进入全屏</span>
+            </button>
+        </div>
+
+        <!-- 返回按钮 -->
+        <div class="absolute top-4 right-4">
+            <button onclick="backToMenu()" class="glass-effect text-white px-4 py-2 rounded-lg hover:bg-white/20 transition-all">
+                <i class="fa fa-arrow-left mr-2"></i>返回
+            </button>
+        </div>
+
+        <!-- 标题栏 -->
+        <div class="absolute top-8 left-1/2 transform -translate-x-1/2 flex items-center gap-4">
+            <img src="icon.jpg" alt="图标" class="w-24 h-24 rounded-full shadow-lg">
+            <h1 class="text-3xl font-bold text-white drop-shadow-lg whitespace-nowrap text-center">高二（13）班晚自习作业计时系统</h1>
+        </div>
+
+        <!-- 噪音监测仪 -->
+        <div id="noiseMonitor" class="noise-monitor hidden">
+            <div id="noiseLevelText" class="noise-level-text">当前噪音：--dB</div>
+            <div id="noiseWarningText" class="noise-warning-text hidden">请保持安静！</div>
+            <div class="noise-canvas-wrap">
+                <canvas id="noiseCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- 修改当前项任务时长按钮 -->
+        <button id="modifyTaskBtn" class="modify-task-btn hidden" onclick="openModifyTaskModal()">
+            <i class="fa fa-edit mr-1"></i>修改当前项任务时长
+        </button>
+
+        <!-- 通知列表按钮 -->
+        <button id="notificationListBtn" class="notification-list-btn hidden" onclick="toggleNotificationList()">
+            <i class="fa fa-bell mr-1"></i>通知列表
+            <span id="notificationBadge" class="notification-badge hidden">0</span>
+        </button>
+
+        <!-- 通知列表面板 -->
+        <div id="notificationListPanel" class="notification-list-panel hidden">
+            <div class="notification-list-header">
+                <span>共收到 <span id="notificationTotalCount">0</span> 条通知</span>
+                <button onclick="toggleNotificationList()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:1.1rem;">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            <div id="notificationListBody" class="notification-list-body">
+                <!-- 动态填充通知卡片 -->
+            </div>
+        </div>
+
+        <!-- 励志名言 -->
+        <div class="absolute bottom-8 right-8 quote-card">
+            <p id="motivationalQuote" class="quote-text">
+                今日不肯埋头，明日何以抬头
+            </p>
+        </div>
+
+        <!-- 时间显示 -->
+        <div class="flex items-center justify-center mb-8">
+            <div class="time-box">
+                <span id="hours" class="text-9xl font-bold text-white">00</span>
+            </div>
+            <span class="text-9xl font-bold text-white mx-2">:</span>
+            <div class="time-box">
+                <span id="minutes" class="text-9xl font-bold text-white">00</span>
+            </div>
+            <span class="text-9xl font-bold text-white mx-2">:</span>
+            <div class="time-box">
+                <span id="seconds" class="text-9xl font-bold text-white">00</span>
+            </div>
+        </div>
+
+        <!-- 当前作业科目 -->
+        <div class="text-center mb-4" style="height: 4rem; display: flex; align-items: center; justify-content: center;">
+            <h2 id="currentSubject" class="text-5xl font-bold text-white drop-shadow-lg" style="white-space: nowrap;">
+                Ready！Be quiet！
+            </h2>
+        </div>
+
+        <!-- 时间段显示 -->
+        <div class="text-center" style="height: 2.5rem; display: flex; align-items: center; justify-content: center;">
+            <p id="timeRange" class="text-3xl text-white/90 drop-shadow-lg" style="white-space: nowrap;">
+                开始时间：18:50
+            </p>
+        </div>
+    </div>
+
+    <!-- 科目选择弹窗 -->
+    <div id="subjectModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">选择科目</h3>
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="selectSubject('语文')" class="bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-800 py-3 rounded-lg">语文</button>
+                <button onclick="selectSubject('数学')" class="bg-red-100 hover:bg-red-200 active:bg-red-300 text-red-800 py-3 rounded-lg">数学</button>
+                <button onclick="selectSubject('英语')" class="bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-800 py-3 rounded-lg">英语</button>
+                <button onclick="selectSubject('英语订正')" class="bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-800 py-3 rounded-lg">英语订正</button>
+                <button onclick="selectSubject('物理')" class="bg-purple-100 hover:bg-purple-200 active:bg-purple-300 text-purple-800 py-3 rounded-lg">物理</button>
+                <button onclick="selectSubject('化学')" class="bg-orange-100 hover:bg-orange-200 active:bg-orange-300 text-orange-800 py-3 rounded-lg">化学</button>
+                <button onclick="selectSubject('生物')" class="bg-teal-100 hover:bg-teal-200 active:bg-teal-300 text-teal-800 py-3 rounded-lg">生物</button>
+                <button onclick="selectOtherSubject()" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-3 rounded-lg">其他</button>
+            </div>
+            <button onclick="closeSubjectModal()" class="mt-4 w-full bg-gray-200 hover:bg-gray-300 active:bg-gray-400 text-gray-700 py-2 rounded-lg">取消</button>
+        </div>
+    </div>
+
+    <!-- 自定义科目输入弹窗 -->
+    <div id="otherSubjectModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">自定义科目</h3>
+            <input type="text" id="otherSubjectInput" placeholder="请输入科目名称" class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-lg focus:border-primary outline-none mb-4">
+            <div class="flex gap-3">
+                <button onclick="closeOtherSubjectModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg transition-all">取消</button>
+                <button onclick="confirmOtherSubject()" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2 rounded-lg transition-all">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 时间输入弹窗 -->
+    <div id="timeInputModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">输入完成用时（分钟）</h3>
+            <input type="text" id="timeInput" readonly placeholder="0" class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-2xl text-center font-mono focus:border-primary outline-none mb-4">
+            <div class="num-keyboard">
+                <button onclick="inputNumber('1')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">1</button>
+                <button onclick="inputNumber('2')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">2</button>
+                <button onclick="inputNumber('3')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">3</button>
+                <button onclick="inputNumber('4')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">4</button>
+                <button onclick="inputNumber('5')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">5</button>
+                <button onclick="inputNumber('6')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">6</button>
+                <button onclick="inputNumber('7')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">7</button>
+                <button onclick="inputNumber('8')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">8</button>
+                <button onclick="inputNumber('9')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">9</button>
+                <button onclick="backspace()" class="bg-yellow-100 hover:bg-yellow-200 active:bg-yellow-300 text-yellow-800 py-4 text-xl rounded-lg">←</button>
+                <button onclick="inputNumber('0')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">0</button>
+                <button onclick="saveTimeInput()" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white py-4 text-xl rounded-lg">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 开始时间设置弹窗 -->
+    <div id="startTimeModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 w-96 shadow-2xl">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">设置晚自习开始时间</h3>
+            <div class="flex items-center justify-center gap-4 mb-6">
+                <div class="text-center">
+                    <button onclick="editTimePart('hour')" id="hourBtn" class="text-6xl font-bold text-gray-800 hover:text-primary transition-all">18</button>
+                    <p class="text-gray-500 mt-1">时</p>
+                </div>
+                <span class="text-6xl font-bold text-gray-400">:</span>
+                <div class="text-center">
+                    <button onclick="editTimePart('minute')" id="minuteBtn" class="text-6xl font-bold text-gray-800 hover:text-primary transition-all">50</button>
+                    <p class="text-gray-500 mt-1">分</p>
+                </div>
+            </div>
+            <div class="text-right">
+                <button onclick="closeStartTimeModal()" class="mr-3 bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg transition-all">取消</button>
+                <button onclick="startNightTimer()" class="bg-green-500 hover:bg-green-600 text-white px-8 py-2 rounded-lg text-lg font-semibold transition-all">Start！</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 时间部分编辑弹窗 -->
+    <div id="timePartModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 id="timePartTitle" class="text-xl font-bold text-gray-800 mb-4 text-center">设置小时</h3>
+            <input type="text" id="timePartInput" readonly placeholder="0" class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-2xl text-center font-mono focus:border-primary outline-none mb-4">
+            <div class="num-keyboard">
+                <button onclick="inputTimePartNumber('1')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">1</button>
+                <button onclick="inputTimePartNumber('2')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">2</button>
+                <button onclick="inputTimePartNumber('3')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">3</button>
+                <button onclick="inputTimePartNumber('4')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">4</button>
+                <button onclick="inputTimePartNumber('5')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">5</button>
+                <button onclick="inputTimePartNumber('6')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">6</button>
+                <button onclick="inputTimePartNumber('7')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">7</button>
+                <button onclick="inputTimePartNumber('8')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">8</button>
+                <button onclick="inputTimePartNumber('9')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">9</button>
+                <button onclick="timePartBackspace()" class="bg-yellow-100 hover:bg-yellow-200 active:bg-yellow-300 text-yellow-800 py-4 text-xl rounded-lg">←</button>
+                <button onclick="inputTimePartNumber('0')" class="bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-800 py-4 text-xl rounded-lg">0</button>
+                <button onclick="saveTimePart()" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white py-4 text-xl rounded-lg">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提示音音频 -->
+    <audio id="alertSound" preload="auto">
+        <source src="timer.mp3" type="audio/mpeg">
+    </audio>
+
+    <!-- 作业完成大字提示覆盖层 -->
+    <div id="homeworkDoneOverlay" class="homework-done-overlay hidden">
+        <div class="homework-done-content">
+            <div id="homeworkDoneSubject" class="homework-done-subject"></div>
+            <div class="homework-done-time-label">时间到</div>
+        </div>
+    </div>
+
+    <!-- 噪音报告覆盖层 -->
+    <div id="noiseReportOverlay" class="noise-report-overlay hidden">
+        <h2>今日晚自习噪音情况</h2>
+        <div class="noise-report-canvas-wrap">
+            <canvas id="noiseReportCanvas"></canvas>
+        </div>
+        <div id="noiseReportStats" class="noise-report-stats"></div>
+        <button class="noise-report-close-btn" onclick="closeNoiseReport()">关闭报告</button>
+    </div>
+
+    <!-- 教师端修改时间请求弹窗 -->
+    <div id="modifyRequestOverlay" class="notification-popup-overlay hidden">
+        <div class="notification-popup-content" style="max-width:28rem;">
+            <div class="notification-popup-header">
+                <span style="font-size:1.75rem;">⏱️</span>
+                <span class="notification-popup-title">更改时间请求</span>
+            </div>
+            <div id="modifyRequestBody" class="notification-popup-body" style="font-size:1.1rem;"></div>
+            <div style="display:flex;gap:1rem;margin-top:1.5rem;">
+                <button onclick="ignoreModifyRequest()" style="flex:1;padding:0.8rem;border:2px solid #e2e8f0;border-radius:0.75rem;background:#fff;color:#555;font-size:1rem;font-weight:600;cursor:pointer;">忽略</button>
+                <button onclick="confirmModifyRequest()" style="flex:1;padding:0.8rem;border:none;border-radius:0.75rem;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:1rem;font-weight:700;cursor:pointer;">确认更改</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 修改当前项任务时长弹窗 -->
+    <div id="modifyTaskModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-8 w-96 shadow-2xl">
+            <h3 class="text-2xl font-bold text-gray-800 mb-6 text-center">修改当前项任务时长</h3>
+            <div class="text-center mb-6">
+                <span id="modifyTaskTimeDisplay" class="text-6xl font-bold text-gray-800" style="font-variant-numeric: tabular-nums;">0</span>
+                <span class="text-2xl font-bold text-gray-500 ml-1">分钟</span>
+            </div>
+            <div class="flex items-center justify-center gap-6 mb-8">
+                <button class="adjust-circle-btn minus-btn" onclick="adjustTaskTime(-5)">-</button>
+                <button class="adjust-circle-btn plus-btn" onclick="adjustTaskTime(5)">+</button>
+            </div>
+            <div class="text-right">
+                <button onclick="closeModifyTaskModal()" class="mr-3 bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg transition-all">取消</button>
+                <button onclick="saveTaskTime()" class="bg-pink-500 hover:bg-pink-600 text-white px-8 py-2 rounded-lg text-lg font-semibold transition-all">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ntfy 通知弹窗覆盖层 -->
+    <div id="notificationPopupOverlay" class="notification-popup-overlay hidden">
+        <div class="notification-popup-content">
+            <div class="notification-popup-header">
+                <span id="notificationPopupTitle" class="notification-popup-title"></span>
+                <span id="notificationSubjectTag" class="notification-subject-tag hidden"></span>
+                <span id="notificationPriorityBadge" class="notification-priority-badge"></span>
+            </div>
+            <div id="notificationPopupBody" class="notification-popup-body"></div>
+            <div class="notification-popup-footer">
+                <button id="notificationAckBtn" class="notification-ack-btn" onclick="acknowledgeNotification()">
+                    已知晓（20）
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知详情覆盖层 -->
+    <div id="notificationDetailOverlay" class="notification-detail-overlay hidden" onclick="closeNotificationDetail(event)">
+        <div class="notification-detail-content" onclick="event.stopPropagation()">
+            <div class="notification-popup-header">
+                <span id="notificationDetailTitle" class="notification-popup-title"></span>
+                <span id="notificationDetailSubjectTag" class="notification-subject-tag hidden"></span>
+                <span id="notificationDetailPriorityBadge" class="notification-priority-badge"></span>
+            </div>
+            <div id="notificationDetailBody" class="notification-popup-body"></div>
+            <div class="notification-popup-footer">
+                <button class="notification-ack-btn" onclick="closeNotificationDetail()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== CloudBase 数据库配置 ====================
+        // 通过 Cloudflare Pages Worker 代理访问腾讯 CloudBase PostgreSQL（PostgREST 兼容）
+        const CB_API_URL = 'https://wh12z213stu.pages.dev/api/supabase';
+
+        // CloudBase REST API 通用封装（通过 REST API 直连，无需加载 SDK）
+        function sbRest(table, method, body) {
+            var url = CB_API_URL + '/rest/v1/' + table;
+            var opts = {
+                method: method || 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            if (body && (method === 'POST' || method === 'PATCH')) {
+                opts.body = JSON.stringify(body);
+            }
+            return fetch(url, opts).then(function(r) {
+                if (!r.ok) throw new Error('CloudBase REST error: ' + r.status);
+                return r.json();
+            });
+        }
+
+        // GET 查询：sbGet(table, filterCol, filterVal, selectCols)
+        function sbGet(table, filterCol, filterVal, selectCols) {
+            var url = CB_API_URL + '/rest/v1/' + table + (filterCol ? '?' + filterCol + '=eq.' + encodeURIComponent(filterVal) : '');
+            if (selectCols) url += (filterCol ? '&' : '?') + 'select=' + selectCols;
+            return fetch(url, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }).then(function(r) { return r.json(); });
+        }
+
+        // 返回 data[0] 或 null
+        function sbGetSingle(table, filterCol, filterVal, selectCols) {
+            return sbGet(table, filterCol, filterVal, selectCols).then(function(data) {
+                return data && data.length > 0 ? data[0] : null;
+            });
+        }
+
+        // 插入
+        function sbInsert(table, row) {
+            return sbRest(table, 'POST', row).then(function(data) {
+                return data && data.length > 0 ? data[0] : row;
+            });
+        }
+
+        // 更新（PATCH）：sbUpdate(table, filterCol, filterVal, updates)
+        function sbUpdate(table, filterCol, filterVal, updates) {
+            var url = CB_API_URL + '/rest/v1/' + table + '?' + filterCol + '=eq.' + encodeURIComponent(filterVal);
+            return fetch(url, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updates)
+            }).then(function(r) { return r.json(); });
+        }
+
+        // 删除：sbDelete(table, filterCol, filterVal)
+        // filterVal 支持带操作符前缀（如 'neq.xxx'），否则默认 'eq.'
+        function sbDelete(table, filterCol, filterVal) {
+            var match = /^(eq|neq|gt|gte|lt|lte|like|ilike|in|is|cs|cd)\.(.*)$/.exec(filterVal);
+            var filterExpr = match ? (match[1] + '.' + encodeURIComponent(match[2])) : ('eq.' + encodeURIComponent(filterVal));
+            var url = CB_API_URL + '/rest/v1/' + table + '?' + filterCol + '=' + filterExpr;
+            return fetch(url, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }).then(function(r) { return r.json(); });
+        }
+
+        // ==================== 时间表数据库方法 ====================
+        var DB = {
+            // 带超时的 fetch 封装（超时毫秒）
+            _fetchWithTimeout: function(url, opts, timeoutMs) {
+                var controller = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
+                var finalOpts = Object.assign({}, opts, { signal: controller.signal });
+                return fetch(url, finalOpts).then(function(r) {
+                    clearTimeout(timer);
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                }).catch(function(e) {
+                    clearTimeout(timer);
+                    throw e;
+                });
+            },
+            // 单次保存时间表尝试（带20s超时）
+            _saveScheduleOnce: function(date, startTimeStr, hwList) {
+                var payload = {
+                    date: date,
+                    start_time: startTimeStr,
+                    homework_list: JSON.stringify(hwList)
+                };
+                var self = this;
+                // 查询是否存在（带超时）
+                var queryUrl = CB_API_URL + '/rest/v1/schedules?date=eq.' + encodeURIComponent(date) + '&select=id';
+                return self._fetchWithTimeout(queryUrl, { headers: { 'Content-Type': 'application/json' } }, 20000).then(function(data) {
+                    var existing = (data && data.length > 0) ? data[0] : null;
+                    var fullPayload = Object.assign({}, payload, { updated_at: new Date().toISOString() });
+                    if (existing && existing.id) {
+                        // 更新（带超时）
+                        var updateUrl = CB_API_URL + '/rest/v1/schedules?id=eq.' + encodeURIComponent(existing.id);
+                        return self._fetchWithTimeout(updateUrl, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(fullPayload)
+                        }, 20000).then(function() { return true; });
+                    } else {
+                        // 插入（带超时）
+                        var insertPayload = Object.assign({}, fullPayload, { created_at: new Date().toISOString() });
+                        return self._fetchWithTimeout(CB_API_URL + '/rest/v1/schedules', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(insertPayload)
+                        }, 20000).then(function() { return true; });
+                    }
+                });
+            },
+            // 保存时间表（最多重试10次，每次超时20s，全部失败返回 false）
+            saveSchedule: function(date, startTimeStr, hwList) {
+                var self = this;
+                var maxRetries = 10;
+                function attempt(n) {
+                    return self._saveScheduleOnce(date, startTimeStr, hwList).then(function() {
+                        if (n > 1) console.log('DB.saveSchedule 第 ' + n + ' 次尝试成功');
+                        return true;
+                    }).catch(function(e) {
+                        console.warn('DB.saveSchedule 第 ' + n + ' 次尝试失败:', e.message || e);
+                        if (n >= maxRetries) {
+                            console.warn('DB.saveSchedule 已达到最大重试次数(' + maxRetries + ')，放弃数据库存储');
+                            return false;
+                        }
+                        return attempt(n + 1);
+                    });
+                }
+                return attempt(1);
+            },
+            // 获取某日时间表，返回 {date, start_time, homework_list, updated_at} 或 null
+            getSchedule: function(date) {
+                return sbGetSingle('schedules', 'date', date, 'date,start_time,homework_list,updated_at').then(function(row) {
+                    if (!row) return null;
+                    return {
+                        date: row.date,
+                        start_time: row.start_time,
+                        homework_list: typeof row.homework_list === 'string' ? JSON.parse(row.homework_list) : row.homework_list,
+                        updated_at: row.updated_at
+                    };
+                }).catch(function(e) {
+                    console.warn('DB.getSchedule 失败:', e);
+                    return null;
+                });
+            },
+            // 删除所有 date != todayDate 的旧时间表
+            deleteOldSchedules: function(todayDate) {
+                return sbDelete('schedules', 'date', 'neq.' + todayDate).catch(function(e) {
+                    console.warn('DB.deleteOldSchedules 失败:', e);
+                });
+            },
+            // 查询所有 pending 修改请求（按 created_at 降序）
+            getPendingModifyRequests: function() {
+                var url = CB_API_URL + '/rest/v1/modify_requests?status=eq.pending&order=created_at.desc';
+                return fetch(url, {
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }).then(function(r) { return r.json(); }).catch(function(e) {
+                    console.warn('DB.getPendingModifyRequests 失败:', e);
+                    return [];
+                });
+            },
+            // 同意修改请求，返回该请求完整数据（date, start_time, homework_list）
+            approveModifyRequest: function(id) {
+                return sbUpdate('modify_requests', 'id', id, {
+                    status: 'approved',
+                    resolved_at: new Date().toISOString()
+                }).then(function(rows) {
+                    return rows && rows.length > 0 ? rows[0] : null;
+                }).catch(function(e) {
+                    console.warn('DB.approveModifyRequest 失败:', e);
+                    return null;
+                });
+            },
+            // 忽略修改请求
+            ignoreModifyRequest: function(id) {
+                return sbUpdate('modify_requests', 'id', id, {
+                    status: 'ignored',
+                    resolved_at: new Date().toISOString()
+                }).catch(function(e) {
+                    console.warn('DB.ignoreModifyRequest 失败:', e);
+                });
+            },
+            // 创建修改请求，返回插入的记录（含 id）
+            createModifyRequest: function(date, startTimeStr, hwList) {
+                var payload = {
+                    date: date,
+                    start_time: startTimeStr,
+                    homework_list: JSON.stringify(hwList),
+                    status: 'pending',
+                    created_at: new Date().toISOString()
+                };
+                return sbInsert('modify_requests', payload).catch(function(e) {
+                    console.warn('DB.createModifyRequest 失败:', e);
+                    return null;
+                });
+            }
+        };
+
+        // 数据库状态提示（页面顶部 toast，4 秒后消失）
+        function showScheduleStatus(msg, type) {
+            var toast = document.getElementById('dbStatusToast');
+            var text = document.getElementById('dbStatusText');
+            if (!toast || !text) return;
+            toast.style.background = type === 'success' ? '#16a34a' : (type === 'error' ? '#dc2626' : '#3b82f6');
+            text.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(function() { toast.style.display = 'none'; }, 4000);
+        }
+
+        // ==================== 全局变量 ====================
+        let currentRowId = 0;
+        let editingRow = null;
+        let editingTimePart = null;
+        let homeworkList = [];
+        let startTime = { hour: 18, minute: 50 };
+        let timerInterval = null;
+        let lastHomeworkIndex = -1;
+        let alertSound = null;
+        let quoteTimer = null;
+        let currentQuoteIndex = 0;
+        let usedQuoteIndices = [];
+
+        // 考试计时变量
+        let examTimerInterval = null;
+        let examRealTimeInterval = null;
+        let examQuoteTimer = null;
+        let examTotalSeconds = 0;
+        let examRemainingSeconds = 0;
+        let examDurationHour = 0;
+        let examDurationMinute = 0;
+        let examFinishedAlertShown = false;
+
+        // 晚自习结束1分钟alert
+        let nightFinishedTimer = null;
+
+        // 噪音监测变量
+        let noiseMonitorInterval = null;
+        let noiseData = []; // 存储 {time, db}
+        let audioContext = null;
+        let analyser = null;
+        let microphone = null;
+        let noiseCanvas = null;
+        let noiseCtx = null;
+        let noiseStartTime = null; // 晚自习开始时间戳
+
+        // 修改任务时长临时变量
+        let modifyTempTime = 0;
+        let modifyCurrentIndex = -1;
+
+        // 噪音监测辅助变量
+        let noiseLoudStartTime = 0;       // 持续>35dB的开始时间
+        let noiseWarningShowTime = 0;      // 安静提示显示时间
+        let noiseLastDisplayTime = 0;      // 噪音文字节流时间
+
+        // ntfy通知变量
+        let ntfyEventSource = null;        // EventSource实例
+        let receivedNotifications = [];    // 接收到的通知数组
+        let notificationQueue = [];        // 弹窗队列
+        let currentNotificationPopup = null; // 当前弹窗定时器引用
+        let isPopupShowing = false;        // 弹窗是否正在显示
+        let notificationCountdownInterval = null; // 倒计时interval
+        let notificationAckCountdown = 20; // 倒计时秒数
+        let notificationListOpen = false;  // 通知列表是否打开
+        let ntfyConnectionFailed = false;  // 连接是否曾失败
+        let modifyRequestEventSource = null; // 教师端修改请求SSE
+        let pendingModifyRequest = null;     // 当前待处理的修改请求
+        let processedModifyRequestIds = new Set(JSON.parse(localStorage.getItem('processed_modify_ids') || '[]')); // 已处理的修改请求ID，防止重复弹窗
+
+        // ==================== 励志名言列表（400句）====================
+        const motivationalQuotes = [
+            "天行健，君子以自强不息。——《易经》",
+            "少年负壮气，奋烈自有时。——李白",
+            "青春须早为，岂能长少年。——孟郊",
+            "鲜衣怒马少年时，不负韶华行且知。",
+            "少年心事当拏云，谁念幽寒坐呜呃。——李贺",
+            "莫等闲，白了少年头，空悲切。——岳飞",
+            "盛年不重来，一日难再晨。及时当勉励，岁月不待人。——陶渊明",
+            "黑发不知勤学早，白首方悔读书迟。——颜真卿",
+            "少年易老学难成，一寸光阴不可轻。——朱熹",
+            "白日莫闲过，青春不再来。",
+            "青春不以山海为远，少年自当奔赴远方。",
+            "追风赶月莫停留，平芜尽处是春山。",
+            "少年不惧岁月长，彼方尚有荣光在。",
+            "以梦为马，不负韶华。",
+            "心有丘壑，眼存山河；鲜衣怒马，逐梦出发。",
+            "纵有疾风起，人生不言弃。",
+            "且将新火试新茶，诗酒趁年华。——苏轼",
+            "丈夫志四海，万里犹比邻。——曹植",
+            "男儿何不带吴钩，收取关山五十州。——李贺",
+            "不驰于空想，不骛于虚声。——李大钊",
+            "路漫漫其修远兮，吾将上下而求索。——屈原",
+            "千磨万击还坚劲，任尔东西南北风。——郑板桥",
+            "宝剑锋从磨砺出，梅花香自苦寒来。——《警世贤文》",
+            "业精于勤，荒于嬉；行成于思，毁于随。——韩愈",
+            "纸上得来终觉浅，绝知此事要躬行。——陆游",
+            "学而不思则罔，思而不学则殆。——孔子",
+            "博学之，审问之，慎思之，明辨之，笃行之。——《礼记》",
+            "非学无以广才，非志无以成学。——诸葛亮",
+            "志不强者智不达，言不信者行不果。——墨翟",
+            "锲而不舍，金石可镂。——荀子",
+            "千里之行，始于足下。——老子",
+            "积土成山，风雨兴焉；积水成渊，蛟龙生焉。——荀子",
+            "不积跬步，无以至千里；不积小流，无以成江海。——荀子",
+            "合抱之木，生于毫末；九层之台，起于累土。——老子",
+            "读书破万卷，下笔如有神。——杜甫",
+            "腹有诗书气自华，读书万卷始通神。——苏轼",
+            "旧书不厌百回读，熟读深思子自知。——苏轼",
+            "书犹药也，善读之可以医愚。——刘向",
+            "问渠那得清如许？为有源头活水来。——朱熹",
+            "读书之法，在循序而渐进，熟读而精思。——朱熹",
+            "为山九仞，功亏一篑。——《尚书》",
+            "差以毫厘，谬以千里。——《汉书》",
+            "长风破浪会有时，直挂云帆济沧海。——李白",
+            "天生我材必有用，千金散尽还复来。——李白",
+            "自信人生二百年，会当水击三千里。——毛泽东",
+            "我生来就是高山而非溪流，我欲于群峰之巅俯视平庸的沟壑。——张桂梅",
+            "乾坤未定，你我皆是黑马。",
+            "世界上只有一种英雄主义，认清生活真相后依然热爱生活。——罗曼·罗兰",
+            "凡是不能杀死我的，必将使我更强大。——尼采",
+            "万物皆有裂痕，那是光照进来的地方。——莱昂纳德·科恩",
+            "你若盛开，蝴蝶自来；你若精彩，天自安排。",
+            "不要小看自己，人有无限可能。",
+            "他强任他强，清风拂山岗。",
+            "心有山海，静而不争。",
+            "凡心所向，素履以往；生如逆旅，一苇以航。",
+            "以今日之我，胜昨日之我。",
+            "把简单的事做好，就是不简单。",
+            "细节决定成败，态度决定高度。",
+            "脚踏实地，仰望星空。",
+            "默默努力，悄悄拔尖，惊艳所有人。",
+            "自律即自由。",
+            "自由不是随心所欲，而是自我主宰。——康德",
+            "克制自己，才能掌控人生。",
+            "耐得住寂寞，才能守得住繁华。",
+            "熬得住出众，熬不住出局。",
+            "成功的路上并不拥挤，因为坚持的人不多。",
+            "所谓光辉岁月，不是以后闪耀的日子，而是无人问津时对梦想的坚持。",
+            "日复一日的坚持，比瞬间的爆发更重要。",
+            "最慢的步伐不是跬步，而是徘徊；最快的脚步不是冲刺，而是坚持。",
+            "坚持别人不能坚持的，才能拥有别人不能拥有的。",
+            "今日不肯埋头，明日何以抬头。",
+            "你有多自律，人生就有多自由。",
+            "对自己狠一点，未来的你会感谢现在的你。",
+            "现在偷的懒，都会变成未来的坑。",
+            "现在多一分努力，未来少一分无奈。",
+            "将来的你，一定会感谢现在拼命的自己。",
+            "所有的幸运，都是坚持的伏笔。",
+            "所有的开挂，都是厚积薄发。",
+            "没有白走的路，每一步都算数。",
+            "路再远，行则将至；事再难，做则必成。",
+            "行百里者半九十。——《战国策》",
+            "一曝十寒，万事难成。",
+            "功到自然成，事在人为。",
+            "勤能补拙是良训，一分辛苦一分才。",
+            "天才是百分之一的灵感，加百分之九十九的汗水。——爱迪生",
+            "书山有路勤为径，学海无涯苦作舟。",
+            "勤学如春起之苗，不见其增，日有所长。",
+            "懒惰如磨刀之石，不见其损，日有所亏。",
+            "不勤学，则无术；不深思，则无得。",
+            "今日事，今日毕。",
+            "时间就像海绵里的水，挤一挤总会有的。——鲁迅",
+            "盛年不重来，一日难再晨；及时当勉励，岁月不待人。——陶渊明",
+            "一寸光阴一寸金，寸金难买寸光阴。",
+            "莫待明日，明日何其多。",
+            "劝君惜取少年时，莫待无花空折枝。",
+            "浪费时间是所有支出中最奢侈的。",
+            "时间最公平，你把它花在哪里，收获就在哪里。",
+            "把握当下，就是把握未来。",
+            "与其抱怨黑暗，不如提灯前行。",
+            "与其临渊羡鱼，不如退而结网。",
+            "抱怨身处黑暗，不如提灯前行。",
+            "你只管努力，剩下的交给时间。",
+            "但行前路，莫问西东。",
+            "心无旁骛，专注当下。",
+            "专注一事，深耕多年，必有所成。",
+            "静能生慧，躁则多忧。",
+            "非淡泊无以明志，非宁静无以致远。——诸葛亮",
+            "静以修身，俭以养德。——诸葛亮",
+            "心如止水，方能行稳致远。",
+            "沉下心来，才能厚积薄发。",
+            "稳住心态，步步为营。",
+            "不急不躁，不慌不忙，向阳生长。",
+            "把浮躁放下，把努力留下。",
+            "平心静气，日积月累，自有回响。",
+            "低调做人，高调做事。",
+            "成功属于耐得住寂寞、守得住初心的人。",
+            "不急于求成，不半途而废。",
+            "慢慢来，比较快。",
+            "一步一个脚印，稳稳走向远方。",
+            "坚持到底，就是胜利。",
+            "志当存高远。——诸葛亮",
+            "三军可夺帅也，匹夫不可夺志也。——孔子",
+            "人生为一大事来，做一大事去。",
+            "心有理想，眼中有光；脚下有路，未来可期。",
+            "以理想为帆，以奋斗为桨，驶向星辰大海。",
+            "理想是指路明灯，没有理想，就没有坚定的方向。——托尔斯泰",
+            "路的尽头还是路，只要你愿意走。",
+            "只要心中有光，何惧道阻且长。",
+            "纵有风雨，心向阳光；纵有坎坷，步履不停。",
+            "心若向阳，无畏悲伤；心若向暖，何惧风霜。",
+            "没有伞的孩子，必须努力奔跑。",
+            "生活以痛吻我，我却报之以歌。——泰戈尔",
+            "黑夜给了我黑色的眼睛，我却用它寻找光明。——顾城",
+            "即使爬到最高的山上，一次也只能脚踏实地地迈一步。",
+            "星光不问赶路人，时光不负有心人。",
+            "你今天的努力，是未来的底气。",
+            "未来可期，人间值得。",
+            "凡是过往，皆为序章。——莎士比亚",
+            "心之所向，素履以往；生如逆旅，一苇以航。",
+            "不忘初心，方得始终。",
+            "初心如磐，使命在肩。",
+            "不忘来路，方能行远。",
+            "心中有信仰，脚下有力量。",
+            "信仰是黑暗中的光，是迷茫时的方向。",
+            "只要信念不倒，希望永远都在。",
+            "不为模糊的未来担忧，只为清晰的现在努力。",
+            "把目光放长远，把脚步踩踏实。",
+            "人生没有白走的路，每一步都算数。",
+            "你若决定灿烂，山无遮，海无拦。",
+            "心有丘壑，眼存山河。",
+            "不困于心，不役于物；不畏将来，不念过往。",
+            "乾坤未定，你我皆是黑马；胜负未分，人人皆有可能。",
+            "所谓万丈深渊，下去，也是前程万里。——木心",
+            "半山腰太挤，要去山顶看看。",
+            "会当凌绝顶，一览众山小。——杜甫",
+            "欲穷千里目，更上一层楼。——王之涣",
+            "不畏浮云遮望眼，自缘身在最高层。——王安石",
+            "登高望远，脚踏实地。",
+            "格局决定结局，眼界决定境界。",
+            "心有多大，舞台就有多大。",
+            "燕雀安知鸿鹄之志哉。——陈胜",
+            "老当益壮，宁移白首之心；穷且益坚，不坠青云之志。——王勃",
+            "宁为玉碎，不为瓦全。",
+            "生当作人杰，死亦为鬼雄。——李清照",
+            "男儿立志出乡关，学不成名誓不还。",
+            "志不立，天下无可成之事。——王阳明",
+            "立志要如山，行道要如水。",
+            "有志向的人，脚下有路；有梦想的人，心中有光。",
+            "梦想不会发光，发光的是追逐梦想的你。",
+            "把梦想藏在心底，把努力写在日常。",
+            "梦想虽远，行则必至；道路虽难，做则必成。",
+            "以梦为马，不负韶华；以汗为泉，不负时光。",
+            "每一个不曾起舞的日子，都是对生命的辜负。——尼采",
+            "生命的意义不在于长度，而在于厚度。",
+            "生如夏花之绚烂，死如秋叶之静美。——泰戈尔",
+            "世界吻我以痛，我却报之以歌。——泰戈尔",
+            "平凡的日子，也能开出不平凡的花。",
+            "做自己的太阳，无需借谁的光。",
+            "你本身就很优秀，别否定自己。",
+            "相信自己，你远比想象中更强大。",
+            "人生能有几回搏，此时不搏何时搏。",
+            "搏一搏，单车变摩托；拼一拼，未来更光明。",
+            "努力到无能为力，拼搏到感动自己。",
+            "不为失败找借口，只为成功找方法。",
+            "失败不可怕，可怕的是不敢尝试。",
+            "每一次跌倒，都是成长的勋章。",
+            "挫折是成长的必修课，困难是成功的垫脚石。",
+            "没有经历过失败的人生，是不完整的。",
+            "失败是成功之母，反思是进步之父。",
+            "从哪里跌倒，就从哪里站起来。",
+            "吃一堑，长一智。",
+            "不经一番寒彻骨，怎得梅花扑鼻香。——黄蘖禅师",
+            "艰难困苦，玉汝于成。——张载",
+            "天将降大任于斯人也，必先苦其心志。——孟子",
+            "千锤百炼始成钢，百折不挠终成才。",
+            "不经历风雨，怎么见彩虹。",
+            "阳光总在风雨后，乌云之上有晴空。",
+            "破茧成蝶，方能重获新生；乘风破浪，方能抵达远方。",
+            "成长就是不断突破舒适区。",
+            "所谓成长，就是把哭声调成静音模式，把努力调成倍速模式。",
+            "慢慢变好，是给自己最好的礼物。",
+            "每天进步一点点，就是最大的成功。",
+            "积跬步以至千里，积小胜为大胜。",
+            "比昨天的自己好一点，就是进步。",
+            "成长没有捷径，唯有脚踏实地。",
+            "你付出的每一分努力，都在悄悄成就你。",
+            "所有的成功，都来自日复一日的积累。",
+            "成功不是偶然，而是必然。",
+            "成功的花，人们只惊羡她现时的明艳，然而当初她的芽儿，浸透了奋斗的泪泉。——冰心",
+            "没有随随便便的成功，只有扎扎实实的努力。",
+            "台上一分钟，台下十年功。",
+            "一分耕耘，一分收获。",
+            "种瓜得瓜，种豆得豆。",
+            "天道酬勤，厚积薄发。",
+            "功不唐捐，玉汝于成。",
+            "所有的幸运，都是努力的结果。",
+            "你有多努力，就有多幸运。",
+            "努力的意义，是让自己随时有能力选择想要的生活。",
+            "别在该奋斗的年纪，选择安逸。",
+            "现在不吃学习的苦，将来就要吃生活的苦。",
+            "学习虽苦，但那是通往世界的路。",
+            "现在的辛苦，是未来的铺垫。",
+            "熬过无人问津的日子，才能拥抱诗和远方。",
+            "别让未来的你，讨厌现在不努力的自己。",
+            "努力不是为了感动谁，而是为了拥有更多选择权。",
+            "人生没有白走的路，每一步努力都算数。",
+            "全力以赴，不留遗憾。",
+            "尽力而为，无怨无悔。",
+            "不求尽善尽美，但求尽心尽力。",
+            "努力到最后，最差的结果，也不过是大器晚成。",
+            "大器晚成，也好过一事无成。",
+            "不必行色匆匆，不必光芒四射，不必成为别人，只需做自己。",
+            "做自己，就很好。",
+            "你不需要和别人比，只需要和昨天的自己比。",
+            "每个人都有自己的节奏，不必追赶他人。",
+            "按自己的节奏，慢慢走，稳稳赢。",
+            "不必羡慕别人，你亦是风景。",
+            "你有你的光芒，不必借谁的光。",
+            "世界很吵，做好自己就好。",
+            "接纳不完美的自己，才能更好地成长。",
+            "静能生慧，学能致远。",
+            "静心学习，沉淀自己。",
+            "心无旁骛，专注学习；目有繁星，不负韶华。",
+            "学习是一场孤独的修行，也是一场自我的蜕变。",
+            "把心静下来，把学钻进去。",
+            "沉潜自己，默默深耕。",
+            "不为外界所扰，不为他人所动。",
+            "守得住寂寞，才能见繁华。",
+            "板凳要坐十年冷，文章不写一句空。",
+            "读书不觉已春深，一寸光阴一寸金。",
+            "两耳不闻窗外事，一心只读圣贤书。",
+            "风声雨声读书声，声声入耳；家事国事天下事，事事关心。",
+            "学而时习之，不亦说乎。——孔子",
+            "温故而知新，可以为师矣。——孔子",
+            "知之者不如好之者，好之者不如乐之者。——孔子",
+            "三人行，必有我师焉。择其善者而从之。——孔子",
+            "敏而好学，不耻下问。——孔子",
+            "学而不厌，诲人不倦。——孔子",
+            "学然后知不足，教然后知困。——《礼记》",
+            "知不足，然后能自反也；知困，然后能自强也。",
+            "博学而笃志，切问而近思。——子夏",
+            "读书有三到：心到、眼到、口到。——朱熹",
+            "读书如吃饭，善吃者长精神，不善吃者生痰瘤。",
+            "读书如行路，步步踏实，方能致远。",
+            "读书不求多，但求精；学习不求快，但求懂。",
+            "精读一本好书，胜过泛读十本闲书。",
+            "学习要踏实，做人要诚恳。",
+            "态度决定一切，细节决定成败。",
+            "认真是一种态度，更是一种能力。",
+            "把每一件小事做好，就是大事。",
+            "细节见人品，小事见格局。",
+            "一丝不苟，精益求精。",
+            "严谨治学，踏实做人。",
+            "书山有路勤为径，学海无涯苦作舟。",
+            "学海无涯，学无止境。",
+            "活到老，学到老。",
+            "学习是终身的事业，不是一时的任务。",
+            "时代在进步，学习不止步。",
+            "不学习，就落后；不进步，就淘汰。",
+            "知识改变命运，学习成就未来。",
+            "知识是人类进步的阶梯。——高尔基",
+            "书籍是人类进步的阶梯。——高尔基",
+            "书是全世界的营养品。——莎士比亚",
+            "读万卷书，行万里路。",
+            "读书破万卷，下笔如有神。——杜甫",
+            "腹有诗书气自华，人有学识品自高。",
+            "胸藏文墨怀若谷，腹有诗书气自华。",
+            "学识是底气，才华是铠甲。",
+            "用知识武装自己，用才华成就人生。",
+            "今天多学一点，明天就多一分底气。",
+            "学习的苦是暂时的，不学的苦是终身的。",
+            "现在的努力，是未来的底气；现在的积累，是未来的资本。",
+            "少年辛苦终身事，莫向光阴惰寸功。——杜荀鹤",
+            "莫嫌海角天涯远，但肯摇鞭有到时。——袁枚",
+            "路漫漫其修远兮，吾将上下而求索。——屈原",
+            "求知若渴，虚怀若谷。",
+            "不骄不躁，虚心好学。",
+            "满招损，谦受益。——《尚书》",
+            "三人行，必有我师。——孔子",
+            "虚心使人进步，骄傲使人落后。",
+            "一寸光阴一寸金，寸金难买寸光阴。",
+            "盛年不重来，一日难再晨；及时当勉励，岁月不待人。——陶渊明",
+            "少年易老学难成，一寸光阴不可轻。——朱熹",
+            "莫等闲，白了少年头，空悲切。——岳飞",
+            "黑发不知勤学早，白首方悔读书迟。——颜真卿",
+            "劝君惜取少年时，莫待无花空折枝。",
+            "时间最公平，你把它花在哪里，收获就在哪里。",
+            "时间不等人，珍惜每一分每一秒。",
+            "浪费时间是所有支出中最奢侈的。",
+            "不要等待机会，而要创造机会。",
+            "把握当下，就是把握未来。",
+            "今日事，今日毕；明日事，今日备。",
+            "与其抱怨时间不够，不如合理利用每分每秒。",
+            "碎片化时间，也能积累大能量。",
+            "把时间花在刀刃上，把精力用在学习上。",
+            "早起的鸟儿有虫吃，勤奋的人儿有收获。",
+            "一日之计在于晨，一年之计在于春。",
+            "把握清晨时光，赢在起跑线。",
+            "晚自习是黄金时间，专注高效出成绩。",
+            "珍惜晚自习每一分钟，悄悄努力惊艳所有人。",
+            "安静的夜晚，适合默默深耕；无人的时光，适合悄悄拔尖。",
+            "晚自习的专注度，决定成绩的高度。",
+            "高效利用时间，成绩自然提升。",
+            "专注、高效、自律、坚持，晚自习四字真言。",
+            "不浪费一分一秒，不放弃一丝一毫。",
+            "时间就像海绵里的水，挤一挤总会有的。——鲁迅",
+            "你和学霸的差距，就在时间利用上。",
+            "别人玩耍时你学习，别人休息时你努力，你不优秀谁优秀。",
+            "没有白费的时间，没有白付出的努力。",
+            "每一分钟的专注，都在为未来铺路。",
+            "珍惜现在，就是珍惜未来；把握当下，就是把握人生。",
+            "时光不负有心人，星光不问赶路人。",
+            "你今天的努力，是未来的底气；你今天的坚持，是未来的希望。",
+            "时光荏苒，不负韶华；岁月如梭，不负自己。",
+            "岁月不居，时节如流；奋斗不息，未来可期。",
+            "时不我待，只争朝夕。——毛泽东",
+            "一万年太久，只争朝夕。——毛泽东",
+            "机不可失，时不再来。",
+            "把握时机，抓住当下。",
+            "青春转瞬即逝，奋斗正当其时。",
+            "少年辛苦终身事，莫向光阴惰寸功。",
+            "莫待明日，明日何其多；我生待明日，万事成蹉跎。",
+            "明日复明日，明日何其多；日日待明日，万事皆蹉跎。",
+            "少壮不努力，老大徒伤悲。——《长歌行》",
+            "盛年不再来，一日难再晨；及时当勉励，岁月不待人。",
+            "时间是最公正的裁判，你付出多少，它就回报多少。",
+            "时间是最宝贵的财富，珍惜时间就是珍惜生命。",
+            "人生苦短，不容浪费；时光匆匆，必须珍惜。",
+            "把每一天都当作最后一天来过，你会更加珍惜。",
+            "活在当下，珍惜拥有。",
+            "不念过往，不畏将来；活在当下，全力以赴。",
+            "认真对待每一分每一秒，认真对待每一次学习。",
+            "珍惜晚自习，成就好成绩。",
+            "高效晚自习，学霸养成时。",
+            "安静学习，高效成长。",
+            "专注当下，不负时光。",
+            "与时间赛跑，为梦想奋斗。",
+            "争分夺秒，全力以赴。",
+            "不负时光，不负自己；不负青春，不负梦想。",
+            "以今日之努力，换明日之荣光。",
+            "心有阳光，何惧风霜。",
+            "眼里有光，心中有爱，脚下有路。",
+            "保持热爱，奔赴山海。",
+            "忠于自己，热爱生活。",
+            "全力以赴，未来可期。",
+            "顶峰相见，不负韶华。",
+            "各自努力，最高处见。",
+            "默默努力，悄悄拔尖。",
+            "鲜衣怒马，逐梦天涯。",
+            "以梦为马，不负韶华。",
+            "不负青春，不负自己。",
+            "乘风破浪，无畏远方。",
+            "披荆斩棘，向阳而生。",
+            "全力以赴，不留遗憾。",
+            "天道酬勤，未来可期。",
+            "乾坤未定，皆是黑马。",
+            "生而无畏，战至终章。",
+            "心有丘壑，眼存山河。",
+            "胸有惊雷，面如平湖。",
+            "纵有风雨，心向阳光。",
+            "前路漫漫，亦有灿灿。",
+            "道阻且长，行则将至。",
+            "行而不辍，未来可期。",
+            "日拱一卒，功不唐捐。",
+            "静水深流，润物无声。",
+            "厚积薄发，静待花开。",
+            "默默深耕，自有回响。",
+            "深耕自己，静待时机。",
+            "自律自强，不负时光。",
+            "脚踏实地，仰望星空。",
+            "不忘初心，方得始终。",
+            "但行前路，莫问西东。",
+            "心无旁骛，万事可成。",
+            "专注一事，久久为功。",
+            "稳住心态，步步为营。",
+            "接纳平凡，不甘平庸。",
+            "平凡日子，闪光成长。",
+            "全力以赴，自带光芒。",
+            "你若精彩，天自安排。",
+            "追风赶月，不负流年。"
+        ];
+
+        // ==================== 初始化 ====================
+        document.addEventListener('DOMContentLoaded', function() {
+            document.addEventListener('fullscreenchange', updateFullscreenButton);
+            updateTableRows();
+            alertSound = document.getElementById('alertSound');
+
+            // 从数据库加载当日时间表，并自动清除非当天的时间表
+            var todayDate = new Date().toISOString().split('T')[0];
+            DB.deleteOldSchedules(todayDate);
+            DB.getSchedule(todayDate).then(function(data) {
+                if (data) {
+                    homeworkList = (typeof data.homework_list === 'string' ? JSON.parse(data.homework_list) : data.homework_list).map(function(item, idx) {
+                        return { id: idx, subject: item.subject, time: item.time };
+                    });
+                    var parts = data.start_time.split(':');
+                    startTime = { hour: parseInt(parts[0]), minute: parseInt(parts[1]) };
+                    // 同步 currentRowId，避免后续新增行 id 冲突
+                    currentRowId = homeworkList.length;
+                    updateTableRows();
+                }
+            }).catch(function(e) { /* 静默 */ });
+        });
+
+        // ==================== 页面切换 ====================
+        function showExamMode() {
+            hideAllModes();
+            // 重置考试计时器状态
+            examRemainingSeconds = 0;
+            examTotalSeconds = 0;
+            examDurationHour = 0;
+            examDurationMinute = 0;
+            examFinishedAlertShown = false;
+            if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+            // 恢复倒计时显示
+            document.getElementById('examHours').textContent = '00';
+            document.getElementById('examMinutes').textContent = '00';
+            document.getElementById('examSeconds').textContent = '00';
+            document.getElementById('examHours').classList.remove('timer-red');
+            document.getElementById('examMinutes').classList.remove('timer-red');
+            document.getElementById('examSeconds').classList.remove('timer-red');
+            document.getElementById('examHours').parentElement.style.display = '';
+            document.getElementById('examColon1').style.display = '';
+            document.getElementById('examSetupArea').classList.remove('hidden');
+            document.getElementById('examSetupArea').innerHTML = '<button onclick="openExamDurationModal()" class="menu-btn text-xl px-8 py-3"><i class="fa fa-cog mr-2"></i>设置考试时长</button>';
+            // 显示考试模式并启动实时时间与名言
+            document.getElementById('examMode').classList.remove('hidden');
+            startExamRealTime();
+            startExamQuoteRotation();
+        }
+
+        function showNightStudyMode() {
+            hideAllModes();
+            document.getElementById('editMode').classList.remove('hidden');
+        }
+
+        function backToMenu() {
+            clearAllTimers();
+            hideAllModes();
+            document.getElementById('mainMenu').classList.remove('hidden');
+        }
+
+        function hideAllModes() {
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('examMode').classList.add('hidden');
+            document.getElementById('editMode').classList.add('hidden');
+            document.getElementById('timerMode').classList.add('hidden');
+        }
+
+        function clearAllTimers() {
+            if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+            if (quoteTimer) { clearInterval(quoteTimer); quoteTimer = null; }
+            if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+            if (examRealTimeInterval) { clearInterval(examRealTimeInterval); examRealTimeInterval = null; }
+            if (examQuoteTimer) { clearInterval(examQuoteTimer); examQuoteTimer = null; }
+            if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
+            // 清理噪音监测资源
+            if (noiseMonitorInterval) { cancelAnimationFrame(noiseMonitorInterval); noiseMonitorInterval = null; }
+            if (microphone) { microphone.stop(); microphone = null; }
+            if (audioContext) { audioContext.close().catch(e => {}); audioContext = null; analyser = null; }
+            noiseData = [];
+            // 隐藏噪音监测仪和修改任务按钮
+            const nm = document.getElementById('noiseMonitor');
+            if (nm) nm.classList.add('hidden');
+            const mb = document.getElementById('modifyTaskBtn');
+            if (mb) mb.classList.add('hidden');
+            // 关闭ntfy连接
+            if (ntfyEventSource) { ntfyEventSource.close(); ntfyEventSource = null; }
+            // 关闭教师端修改请求 SSE 与数据库轮询
+            if (modifyRequestEventSource) { modifyRequestEventSource.close(); modifyRequestEventSource = null; }
+            if (modifyRequestPollInterval) { clearInterval(modifyRequestPollInterval); modifyRequestPollInterval = null; }
+            lastShownModifyRequestId = null;
+            // 隐藏通知列表按钮和面板，清理弹窗
+            const nlb = document.getElementById('notificationListBtn');
+            if (nlb) nlb.classList.add('hidden');
+            const nlp = document.getElementById('notificationListPanel');
+            if (nlp) nlp.classList.add('hidden');
+            notificationListOpen = false;
+            if (notificationCountdownInterval) { clearInterval(notificationCountdownInterval); notificationCountdownInterval = null; }
+            const npo = document.getElementById('notificationPopupOverlay');
+            if (npo) npo.classList.add('hidden');
+            isPopupShowing = false;
+            notificationQueue = [];
+        }
+
+        // ==================== 考试计时系统 ====================
+        function startExamRealTime() {
+            updateExamRealTime();
+            if (examRealTimeInterval) clearInterval(examRealTimeInterval);
+            examRealTimeInterval = setInterval(updateExamRealTime, 1000);
+        }
+
+        function updateExamRealTime() {
+            const now = new Date();
+            const h = String(now.getHours()).padStart(2, '0');
+            const m = String(now.getMinutes()).padStart(2, '0');
+            const s = String(now.getSeconds()).padStart(2, '0');
+            const el = document.getElementById('examRealTime');
+            if (el) el.textContent = `${h}:${m}:${s}`;
+        }
+
+        function startExamQuoteRotation() {
+            changeExamQuote();
+            if (examQuoteTimer) clearInterval(examQuoteTimer);
+            examQuoteTimer = setInterval(changeExamQuote, 60 * 1000);
+        }
+
+        function changeExamQuote() {
+            if (usedQuoteIndices.length >= motivationalQuotes.length) {
+                usedQuoteIndices = [];
+            }
+            let randomIndex;
+            do {
+                randomIndex = Math.floor(Math.random() * motivationalQuotes.length);
+            } while (usedQuoteIndices.includes(randomIndex));
+            usedQuoteIndices.push(randomIndex);
+            currentQuoteIndex = randomIndex;
+            const quoteEl = document.getElementById('examQuote');
+            if (quoteEl) quoteEl.textContent = motivationalQuotes[currentQuoteIndex];
+        }
+
+        function openExamDurationModal() {
+            examDurationHour = 0;
+            examDurationMinute = 0;
+            document.getElementById('examDurationHour').textContent = '0';
+            document.getElementById('examDurationMinuteTen').textContent = '0';
+            document.getElementById('examDurationMinuteOne').textContent = '0';
+            document.getElementById('examDurationModal').classList.remove('hidden');
+        }
+
+        function closeExamDurationModal() {
+            document.getElementById('examDurationModal').classList.add('hidden');
+        }
+
+        function adjustExamHour(delta) {
+            examDurationHour += delta;
+            if (examDurationHour < 0) examDurationHour = 23;
+            if (examDurationHour > 23) examDurationHour = 0;
+            document.getElementById('examDurationHour').textContent = examDurationHour;
+        }
+
+        function adjustExamMinute(delta) {
+            examDurationMinute += delta;
+            if (examDurationMinute < 0) examDurationMinute = 59;
+            if (examDurationMinute > 59) examDurationMinute = 0;
+            updateExamMinuteDisplay();
+        }
+
+        function adjustExamMinuteTen(delta) {
+            examDurationMinute += delta * 5;
+            if (examDurationMinute < 0) examDurationMinute += 60;
+            if (examDurationMinute > 59) examDurationMinute -= 60;
+            updateExamMinuteDisplay();
+        }
+
+        function adjustExamMinuteOne(delta) {
+            examDurationMinute += delta * 5;
+            if (examDurationMinute < 0) examDurationMinute += 60;
+            if (examDurationMinute > 59) examDurationMinute -= 60;
+            updateExamMinuteDisplay();
+        }
+
+        function updateExamMinuteDisplay() {
+            var ten = Math.floor(examDurationMinute / 10);
+            var one = examDurationMinute % 10;
+            document.getElementById('examDurationMinuteTen').textContent = ten;
+            document.getElementById('examDurationMinuteOne').textContent = one;
+        }
+
+        function startExamTimer() {
+            closeExamDurationModal();
+            examTotalSeconds = examDurationHour * 3600 + examDurationMinute * 60;
+            if (examTotalSeconds <= 0) {
+                alert('请设置有效的考试时长！');
+                return;
+            }
+            examRemainingSeconds = examTotalSeconds;
+            examFinishedAlertShown = false;
+
+            requestFullscreen();
+            document.getElementById('examSetupArea').classList.add('hidden');
+            updateExamDisplay();
+
+            if (examTimerInterval) clearInterval(examTimerInterval);
+            examTimerInterval = setInterval(updateExamCountdown, 1000);
+        }
+
+        function updateExamCountdown() {
+            examRemainingSeconds--;
+            if (examRemainingSeconds <= 0) {
+                examRemainingSeconds = 0;
+                updateExamDisplay();
+                clearInterval(examTimerInterval);
+                examTimerInterval = null;
+                if (!examFinishedAlertShown) {
+                    examFinishedAlertShown = true;
+                    if (alertSound) {
+                        alertSound.volume = 1.0;
+                        alertSound.currentTime = 0;
+                        alertSound.play().catch(e => console.log('音频播放失败:', e));
+                    }
+                }
+                return;
+            }
+            updateExamDisplay();
+        }
+
+        function updateExamDisplay() {
+            const h = Math.floor(examRemainingSeconds / 3600);
+            const m = Math.floor((examRemainingSeconds % 3600) / 60);
+            const s = examRemainingSeconds % 60;
+
+            const hourEl = document.getElementById('examHours');
+            const minuteEl = document.getElementById('examMinutes');
+            const secondEl = document.getElementById('examSeconds');
+            const colonSec = document.getElementById('examColonSec');
+
+            // 超过1小时显示时:分:秒，否则显示分:秒
+            const colon1 = document.getElementById('examColon1');
+            if (h > 0) {
+                hourEl.parentElement.style.display = '';
+                if (colon1) colon1.style.display = '';
+                hourEl.textContent = String(h).padStart(2, '0');
+                minuteEl.textContent = String(m).padStart(2, '0');
+            } else {
+                hourEl.parentElement.style.display = 'none';
+                if (colon1) colon1.style.display = 'none';
+                minuteEl.textContent = String(m).padStart(2, '0');
+            }
+            secondEl.textContent = String(s).padStart(2, '0');
+
+            // 剩余10%时间变红
+            const isRed = examRemainingSeconds > 0 && examRemainingSeconds <= examTotalSeconds * 0.1;
+            [hourEl, minuteEl, secondEl].forEach(el => {
+                if (isRed) {
+                    el.classList.add('timer-red');
+                } else {
+                    el.classList.remove('timer-red');
+                }
+            });
+        }
+
+        // ==================== 晚自习计时系统 ====================
+        function addHomeworkRow() {
+            const row = { id: currentRowId++, subject: null, time: null };
+            homeworkList.push(row);
+            updateTableRows();
+        }
+
+        function updateTableRows() {
+            const tbody = document.getElementById('homeworkTable');
+            tbody.innerHTML = '';
+
+            // 预计时间计算（考虑 20:20-20:30 课间休息）
+            const breakStart = 20 * 60 + 20;
+            const breakEnd = 20 * 60 + 30;
+            let hwStart = startTime.hour * 60 + startTime.minute;
+            let breakInserted = false;
+
+            const fmtTime = (totalMin) => {
+                const h = Math.floor(totalMin / 60) % 24;
+                const m = totalMin % 60;
+                return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+            };
+
+            homeworkList.forEach((row, index) => {
+                const timeMin = row.time || 0;
+                let hwEnd = hwStart + timeMin;
+                let estTimeHtml = '<span class="text-gray-400 text-sm">—</span>';
+
+                if (row.time) {
+                    // 检查是否跨越下课时间（作业在下课前开始，且会持续到下课期间）
+                    if (hwStart < breakStart && hwEnd > breakStart) {
+                        // 跨下课项目：预计时间分三行显示
+                        const overlap = Math.min(hwEnd, breakEnd) - breakStart;
+                        hwEnd += overlap;
+                        estTimeHtml = `<div style="font-size:0.75rem;line-height:1.7;">
+                            <div class="text-gray-600 font-medium">${fmtTime(hwStart)} - ${fmtTime(breakStart)}</div>
+                            <div style="color:#92400e;font-weight:600;">☕ 课间休息 ${fmtTime(breakStart)} - ${fmtTime(breakEnd)}</div>
+                            <div class="text-gray-600 font-medium">${fmtTime(breakEnd)} - ${fmtTime(hwEnd)}</div>
+                        </div>`;
+                        breakInserted = true;
+                    } else {
+                        // 非跨下课项目：检查是否需要插入课间休息独立行
+                        if (!breakInserted && hwStart >= breakStart) {
+                            // 如果作业在下课期间开始，顺延到下课后
+                            if (hwStart < breakEnd) {
+                                hwStart = breakEnd;
+                                hwEnd = hwStart + timeMin;
+                            }
+                            const breakTr = document.createElement('tr');
+                            breakTr.className = 'border-b border-gray-100';
+                            breakTr.style.background = '#fef3c7';
+                            breakTr.innerHTML = `
+                                <td class="py-3 px-4 text-amber-700">—</td>
+                                <td class="py-3 px-4 text-amber-700 font-semibold">☕ 课间休息</td>
+                                <td class="py-3 px-4 text-amber-700">10min</td>
+                                <td class="py-3 px-4 text-amber-700 text-sm">${fmtTime(breakStart)} - ${fmtTime(breakEnd)}</td>
+                                <td class="py-3 px-4"></td>
+                            `;
+                            tbody.appendChild(breakTr);
+                            breakInserted = true;
+                        }
+                        estTimeHtml = `<span class="text-gray-600 text-sm font-medium">${fmtTime(hwStart)} - ${fmtTime(hwEnd)}</span>`;
+                    }
+                }
+
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-gray-100 hover:bg-gray-50';
+                tr.innerHTML = `
+                    <td class="py-4 px-4 text-gray-700">${index + 1}</td>
+                    <td class="py-4 px-4">
+                        ${row.subject ?
+                            `<span class="text-gray-800 font-medium">${row.subject}</span>` :
+                            `<button onclick="openSubjectModal(${row.id})" class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-4 py-2 rounded-lg transition-all">
+                                <i class="fa fa-book mr-2"></i>选择科目
+                            </button>`
+                        }
+                    </td>
+                    <td class="py-4 px-4">
+                        ${row.time ?
+                            `<span class="text-gray-800 font-medium">${row.time}min</span>` :
+                            `<button onclick="openTimeInputModal(${row.id})" class="bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg transition-all">
+                                <i class="fa fa-clock-o mr-2"></i>输入完成用时
+                            </button>`
+                        }
+                    </td>
+                    <td class="py-4 px-4">${estTimeHtml}</td>
+                    <td class="py-4 px-4">
+                        <button onclick="deleteRow(${row.id})" class="text-red-500 hover:text-red-700 font-medium transition-all">
+                            <i class="fa fa-trash mr-1"></i>删除
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+
+                if (row.time) {
+                    hwStart = hwEnd;
+                }
+            });
+        }
+
+        function deleteRow(id) {
+            homeworkList = homeworkList.filter(row => row.id !== id);
+            updateTableRows();
+        }
+
+        function openSubjectModal(rowId) {
+            editingRow = rowId;
+            document.getElementById('subjectModal').classList.remove('hidden');
+        }
+
+        function closeSubjectModal() {
+            document.getElementById('subjectModal').classList.add('hidden');
+            editingRow = null;
+        }
+
+        function selectSubject(subject) {
+            const row = homeworkList.find(r => r.id === editingRow);
+            if (row) { row.subject = subject; updateTableRows(); }
+            closeSubjectModal();
+        }
+
+        function selectOtherSubject() {
+            const currentEditingRow = editingRow;
+            closeSubjectModal();
+            editingRow = currentEditingRow;
+            document.getElementById('otherSubjectInput').value = '';
+            document.getElementById('otherSubjectModal').classList.remove('hidden');
+        }
+
+        function closeOtherSubjectModal() {
+            document.getElementById('otherSubjectModal').classList.add('hidden');
+            editingRow = null;
+        }
+
+        function confirmOtherSubject() {
+            const input = document.getElementById('otherSubjectInput').value.trim();
+            if (input) {
+                const row = homeworkList.find(r => r.id === editingRow);
+                if (row) { row.subject = input; updateTableRows(); }
+            }
+            closeOtherSubjectModal();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const input = document.getElementById('otherSubjectInput');
+            if (input) {
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') { e.preventDefault(); confirmOtherSubject(); }
+                });
+            }
+        });
+
+        function openTimeInputModal(rowId) {
+            editingRow = rowId;
+            document.getElementById('timeInput').value = '';
+            document.getElementById('timeInputModal').classList.remove('hidden');
+        }
+
+        function closeTimeInputModal() {
+            document.getElementById('timeInputModal').classList.add('hidden');
+            editingRow = null;
+        }
+
+        let timeInputEl = null;
+        let timePartInputEl = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            timeInputEl = document.getElementById('timeInput');
+            timePartInputEl = document.getElementById('timePartInput');
+        });
+
+        function inputNumber(num) {
+            const input = timeInputEl || document.getElementById('timeInput');
+            if (input.value.length < 3) input.value += num;
+        }
+
+        function backspace() {
+            const input = timeInputEl || document.getElementById('timeInput');
+            input.value = input.value.slice(0, -1);
+        }
+
+        function saveTimeInput() {
+            const input = document.getElementById('timeInput').value;
+            const time = parseInt(input);
+            if (time > 0) {
+                const row = homeworkList.find(r => r.id === editingRow);
+                if (row) { row.time = time; updateTableRows(); }
+            }
+            closeTimeInputModal();
+        }
+
+        function showStartTimeModal() {
+            const incomplete = homeworkList.filter(row => !row.subject || !row.time);
+            if (incomplete.length > 0) { alert('请先完成所有作业项目的填写！'); return; }
+            if (homeworkList.length === 0) { alert('请至少添加一个作业项目！'); return; }
+            // 保存作业后立即广播时间表到教师端
+            broadcastSchedule();
+            document.getElementById('hourBtn').textContent = String(startTime.hour).padStart(2, '0');
+            document.getElementById('minuteBtn').textContent = String(startTime.minute).padStart(2, '0');
+            document.getElementById('startTimeModal').classList.remove('hidden');
+        }
+
+        function closeStartTimeModal() {
+            document.getElementById('startTimeModal').classList.add('hidden');
+        }
+
+        function editTimePart(part) {
+            editingTimePart = part;
+            document.getElementById('timePartInput').value = '';
+            document.getElementById('timePartTitle').textContent = part === 'hour' ? '设置小时' : '设置分钟';
+            document.getElementById('timePartModal').classList.remove('hidden');
+        }
+
+        function closeTimePartModal() {
+            document.getElementById('timePartModal').classList.add('hidden');
+            editingTimePart = null;
+        }
+
+        function inputTimePartNumber(num) {
+            const input = timePartInputEl || document.getElementById('timePartInput');
+            if (input.value.length < 2) input.value += num;
+        }
+
+        function timePartBackspace() {
+            const input = timePartInputEl || document.getElementById('timePartInput');
+            input.value = input.value.slice(0, -1);
+        }
+
+        function saveTimePart() {
+            const input = document.getElementById('timePartInput').value;
+            const value = parseInt(input);
+            if (editingTimePart === 'hour') {
+                if (value >= 0 && value <= 23) {
+                    startTime.hour = value;
+                    document.getElementById('hourBtn').textContent = String(value).padStart(2, '0');
+                } else { alert('小时必须在0-23之间'); return; }
+            } else {
+                if (value >= 0 && value <= 59) {
+                    startTime.minute = value;
+                    document.getElementById('minuteBtn').textContent = String(value).padStart(2, '0');
+                } else { alert('分钟必须在0-59之间'); return; }
+            }
+            closeTimePartModal();
+        }
+
+        function changeQuote() {
+            if (usedQuoteIndices.length >= motivationalQuotes.length) usedQuoteIndices = [];
+            let randomIndex;
+            do { randomIndex = Math.floor(Math.random() * motivationalQuotes.length); }
+            while (usedQuoteIndices.includes(randomIndex));
+            usedQuoteIndices.push(randomIndex);
+            currentQuoteIndex = randomIndex;
+            const quoteEl = document.getElementById('motivationalQuote');
+            if (quoteEl) quoteEl.textContent = motivationalQuotes[currentQuoteIndex];
+        }
+
+        function startNightTimer() {
+            closeStartTimeModal();
+            lastHomeworkIndex = -1;
+            currentQuoteIndex = 0;
+            usedQuoteIndices = [];
+            if (quoteTimer) clearInterval(quoteTimer);
+            if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
+
+            document.getElementById('editMode').classList.add('hidden');
+            document.getElementById('timerMode').classList.remove('hidden');
+            requestFullscreen();
+
+            // 显示噪音监测仪和修改任务按钮
+            document.getElementById('noiseMonitor').classList.remove('hidden');
+            document.getElementById('modifyTaskBtn').classList.remove('hidden');
+
+            // 初始化噪音监测
+            noiseData = [];
+            noiseStartTime = Date.now();
+            initNoiseMonitor();
+
+            timerInterval = setInterval(updateNightTimer, 1000);
+            updateNightTimer();
+            changeQuote();
+            quoteTimer = setInterval(changeQuote, 60 * 1000);
+
+            // 启动ntfy通知连接并显示通知列表按钮
+            initNtfyConnection();
+            document.getElementById('notificationListBtn').classList.remove('hidden');
+
+            // 广播作业时间表到教师端（通过 ntfy JSON API）
+            broadcastSchedule();
+
+            // 启动教师端修改请求监听（ntfy SSE 唯一通道，不再轮询 CloudBase 表）
+            initModifyRequestSubscription();
+        }
+
+        // 广播作业时间表给教师端（优先数据库存储，ntfy 作为备用）
+        function broadcastSchedule() {
+            var schedulePayload = {
+                type: 'schedule',
+                homeworkList: homeworkList.map(function(row) {
+                    return { subject: row.subject, time: row.time };
+                }),
+                startTime: String(startTime.hour).padStart(2, '0') + ':' + String(startTime.minute).padStart(2, '0'),
+                date: new Date().toISOString().split('T')[0]
+            };
+            // 优先数据库存储（最多重试10次，每次超时20s）
+            showScheduleStatus('正在上传时间表至数据库…', 'info');
+            DB.saveSchedule(schedulePayload.date, schedulePayload.startTime, schedulePayload.homeworkList).then(function(ok) {
+                if (ok) {
+                    showScheduleStatus('时间表已保存至数据库', 'success');
+                    DB.deleteOldSchedules(schedulePayload.date);
+                    // 数据库成功，同时通过 ntfy 广播给教师端
+                    fetch('https://ntfy.sh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            topic: 'wh12z213_schedule',
+                            message: JSON.stringify(schedulePayload),
+                            title: '作业时间表',
+                            tags: ['schedule']
+                        })
+                    }).catch(function(err) {
+                        console.warn('ntfy广播作业时间表失败:', err);
+                    });
+                } else {
+                    // 数据库10次重试全部失败，改用 ntfy.sh 上传
+                    showScheduleStatus('数据库上传失败（已重试10次），正在通过ntfy发送…', 'error');
+                    fetch('https://ntfy.sh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            topic: 'wh12z213_schedule',
+                            message: JSON.stringify(schedulePayload),
+                            title: '作业时间表',
+                            tags: ['schedule']
+                        })
+                    }).then(function() {
+                        showScheduleStatus('已通过ntfy.sh发送时间表', 'success');
+                    }).catch(function(err) {
+                        console.warn('ntfy上传作业时间表失败:', err);
+                        showScheduleStatus('时间表上传失败（数据库和ntfy均失败）', 'error');
+                    });
+                }
+            }).catch(function(e) {
+                console.warn('数据库保存异常:', e);
+                // 异常情况也走 ntfy 备用
+                showScheduleStatus('数据库异常，正在通过ntfy发送…', 'error');
+                fetch('https://ntfy.sh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        topic: 'wh12z213_schedule',
+                        message: JSON.stringify(schedulePayload),
+                        title: '作业时间表',
+                        tags: ['schedule']
+                    })
+                }).then(function() {
+                    showScheduleStatus('已通过ntfy.sh发送时间表', 'success');
+                }).catch(function(err) {
+                    showScheduleStatus('时间表上传失败', 'error');
+                });
+            });
+        }
+
+        // 初始化教师端修改请求订阅（ntfy SSE 作为备用通道）
+        function initModifyRequestSubscription() {
+            if (modifyRequestEventSource) {
+                modifyRequestEventSource.close();
+                modifyRequestEventSource = null;
+            }
+            try {
+                modifyRequestEventSource = new EventSource('https://ntfy.sh/wh12z213_modify_request/sse');
+                modifyRequestEventSource.onmessage = function(event) {
+                    handleModifyRequest(event);
+                };
+                modifyRequestEventSource.onerror = function() {
+                    // EventSource 自动重连，静默处理
+                };
+            } catch (e) {
+                console.warn('修改请求订阅初始化失败:', e);
+            }
+        }
+
+        // ====== 数据库修改请求轮询（优先方式，每 5 秒轮询一次） ======
+        var modifyRequestPollInterval = null;   // 轮询定时器
+        var lastShownModifyRequestId = null;    // 最近已弹窗的请求 id，避免重复弹窗
+
+        // 轮询数据库 pending 修改请求
+        function pollModifyRequestsFromDB() {
+            DB.getPendingModifyRequests().then(function(requests) {
+                if (requests && requests.length > 0) {
+                    // 处理最新的请求
+                    var req = requests[0];
+                    if (lastShownModifyRequestId === req.id) return; // 避免重复弹窗
+                    lastShownModifyRequestId = req.id;
+                    showModifyRequestFromDB(req);
+                }
+            }).catch(function(e) { /* 静默 */ });
+        }
+
+        // 将数据库 modify_requests 记录适配为弹窗所需格式并弹窗
+        function showModifyRequestFromDB(req) {
+            if (!req) return;
+            if (pendingModifyRequest && pendingModifyRequest.requestId === req.id) return; // 正在显示则跳过
+            var hwList = req.homework_list;
+            if (typeof hwList === 'string') {
+                try { hwList = JSON.parse(hwList); } catch (e) { hwList = []; }
+            }
+            var data = {
+                type: 'modify_request',
+                requestId: req.id,
+                homeworkList: hwList || [],
+                startTime: req.start_time,
+                date: req.date
+            };
+            pendingModifyRequest = data;
+            showModifyRequestPopup(data);
+        }
+
+        // 处理收到的修改请求（ntfy SSE）
+        function handleModifyRequest(event) {
+            try {
+                var outer = JSON.parse(event.data);
+                var inner = outer.message || event.data;
+                var data = JSON.parse(inner);
+                if (data.type === 'modify_request') {
+                    // 去重：根据 requestId 避免重复弹窗
+                    var reqId = data.requestId || JSON.stringify(data.homeworkList);
+                    if (processedModifyRequestIds.has(reqId)) return;
+                    processedModifyRequestIds.add(reqId);
+                    // 持久化到 localStorage，防止刷新后重复
+                    localStorage.setItem('processed_modify_ids', JSON.stringify(Array.from(processedModifyRequestIds).slice(-200)));
+
+                    pendingModifyRequest = data;
+                    showModifyRequestPopup(data);
+                }
+            } catch (e) {
+                try {
+                    var data = JSON.parse(event.data);
+                    if (data.type === 'modify_request') {
+                        var reqId = data.requestId || JSON.stringify(data.homeworkList);
+                        if (processedModifyRequestIds.has(reqId)) return;
+                        processedModifyRequestIds.add(reqId);
+                        localStorage.setItem('processed_modify_ids', JSON.stringify(Array.from(processedModifyRequestIds).slice(-200)));
+
+                        pendingModifyRequest = data;
+                        showModifyRequestPopup(data);
+                    }
+                } catch (e2) {}
+            }
+        }
+
+        // 显示修改请求弹窗
+        function showModifyRequestPopup(data) {
+            var bodyEl = document.getElementById('modifyRequestBody');
+            var html = '<div style="margin-bottom:1rem;">';
+            html += '<div style="font-size:1rem;font-weight:700;color:#1f2937;margin-bottom:0.8rem;text-align:center;">教师端请求调整作业安排</div>';
+
+            // 对比显示新旧安排
+            var oldList = homeworkList;
+            var newList = data.homeworkList || [];
+            html += '<div style="display:flex;gap:0.5rem;margin-bottom:0.5rem;font-size:0.8rem;color:#94a3b8;font-weight:600;">' +
+                '<div style="flex:1;text-align:center;">当前安排</div>' +
+                '<div style="flex:1;text-align:center;">新安排</div>' +
+                '</div>';
+
+            var maxLen = Math.max(oldList.length, newList.length);
+            for (var i = 0; i < maxLen; i++) {
+                var oldItem = oldList[i] || null;
+                var newItem = newList[i] || null;
+                var hasChanged = !oldItem || !newItem || oldItem.subject !== newItem.subject || oldItem.time !== newItem.time;
+                var bgStyle = hasChanged ? 'background:#fef3c7;' : 'background:#f8fafc;';
+                html += '<div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;padding:0.4rem 0.5rem;border-radius:0.4rem;' + bgStyle + '">';
+                // 当前
+                if (oldItem) {
+                    html += '<div style="flex:1;font-size:0.85rem;color:#6b7280;text-align:center;">' + (i + 1) + '. ' + escapeHtml(oldItem.subject) + ' ' + oldItem.time + '分</div>';
+                } else {
+                    html += '<div style="flex:1;font-size:0.85rem;color:#cbd5e1;text-align:center;">—</div>';
+                }
+                // 箭头
+                html += '<div style="color:#94a3b8;font-size:0.75rem;display:flex;align-items:center;">→</div>';
+                // 新
+                if (newItem) {
+                    var timeStyle = (oldItem && oldItem.time !== newItem.time) ? 'color:#667eea;font-weight:700;' : 'color:#374151;';
+                    var subjStyle = (oldItem && oldItem.subject !== newItem.subject) ? 'color:#667eea;font-weight:700;' : 'color:#374151;';
+                    html += '<div style="flex:1;font-size:0.85rem;text-align:center;"><span style="' + subjStyle + '">' + escapeHtml(newItem.subject) + '</span> <span style="' + timeStyle + '">' + newItem.time + '分</span></div>';
+                } else {
+                    html += '<div style="flex:1;font-size:0.85rem;color:#cbd5e1;text-align:center;">—</div>';
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+            bodyEl.innerHTML = html;
+            document.getElementById('modifyRequestOverlay').classList.remove('hidden');
+        }
+
+        // 忽略修改请求
+        function ignoreModifyRequest() {
+            var requestId = pendingModifyRequest ? pendingModifyRequest.requestId : null;
+            pendingModifyRequest = null;
+            document.getElementById('modifyRequestOverlay').classList.add('hidden');
+
+            // 通过 ntfy.sh 发送忽略响应，让移动端收到反馈
+            if (requestId) {
+                fetch('https://ntfy.sh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        topic: 'wh12z213_modify_response',
+                        message: JSON.stringify({ requestId: requestId, status: 'ignored' }),
+                        title: '修改请求已忽略',
+                        priority: 3
+                    })
+                }).catch(function(e) { /* 静默 */ });
+            }
+        }
+
+        // 确认更改
+        function confirmModifyRequest() {
+            if (!pendingModifyRequest) return;
+            var newList = pendingModifyRequest.homeworkList;
+            var requestId = pendingModifyRequest.requestId;
+            if (newList && Array.isArray(newList) && newList.length > 0) {
+                // 替换整个作业列表，保留原有 id
+                for (var i = 0; i < newList.length; i++) {
+                    if (i < homeworkList.length) {
+                        homeworkList[i].subject = newList[i].subject;
+                        homeworkList[i].time = newList[i].time;
+                    } else {
+                        homeworkList.push({ id: currentRowId++, subject: newList[i].subject, time: newList[i].time });
+                    }
+                }
+                // 如果新列表更短，删除多余的
+                while (homeworkList.length > newList.length) {
+                    homeworkList.pop();
+                }
+                // 重新广播更新后的时间表（同时保存到数据库 schedules 表）
+                broadcastSchedule();
+            }
+            pendingModifyRequest = null;
+            document.getElementById('modifyRequestOverlay').classList.add('hidden');
+
+            // 通过 ntfy.sh 发送同意响应，让移动端收到反馈
+            if (requestId) {
+                fetch('https://ntfy.sh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        topic: 'wh12z213_modify_response',
+                        message: JSON.stringify({ requestId: requestId, status: 'approved' }),
+                        title: '修改请求已同意',
+                        priority: 3
+                    })
+                }).catch(function(e) { /* 静默 */ });
+            }
+        }
+
+        function updateNightTimer() {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinute = now.getMinutes();
+            const currentSecond = now.getSeconds();
+
+            document.getElementById('hours').textContent = String(currentHour).padStart(2, '0');
+            document.getElementById('minutes').textContent = String(currentMinute).padStart(2, '0');
+            document.getElementById('seconds').textContent = String(currentSecond).padStart(2, '0');
+
+            const currentTotal = currentHour * 60 + currentMinute;
+            const startTotal = startTime.hour * 60 + startTime.minute;
+            const breakStart = 20 * 60 + 20;
+            const breakEnd = 20 * 60 + 30;
+            const schoolEnd = 21 * 60 + 45;
+
+            const subjectEl = document.getElementById('currentSubject');
+            const rangeEl = document.getElementById('timeRange');
+
+            if (currentTotal < startTotal) {
+                subjectEl.textContent = 'Ready！Be quiet！';
+                rangeEl.textContent = `开始时间：${String(startTime.hour).padStart(2, '0')}:${String(startTime.minute).padStart(2, '0')}`;
+                return;
+            }
+
+            if (currentTotal >= schoolEnd) {
+                subjectEl.textContent = '放学啦！';
+                rangeEl.textContent = '';
+                // 延迟10秒后自动显示噪音报告
+                if (lastHomeworkIndex !== -3) {
+                    lastHomeworkIndex = -3;
+                    setTimeout(() => {
+                        showNoiseReport();
+                    }, 10 * 1000);
+                }
+                return;
+            }
+
+            if (currentTotal >= breakStart && currentTotal < breakEnd) {
+                subjectEl.textContent = 'Fully rest yourselves！';
+                rangeEl.textContent = '20:20～20:30';
+                return;
+            }
+
+            let currentHomework = null;
+            let homeworkStart = startTotal;
+            let homeworkEnd = startTotal;
+            let originalEnd = startTotal;
+            let currentIndex = -1;
+
+            for (let i = 0; i < homeworkList.length; i++) {
+                const homework = homeworkList[i];
+                homeworkEnd = homeworkStart + homework.time;
+                originalEnd = homeworkEnd;
+                // 作业跨越20:20-20:30下课时间，结束时间顺延（按实际重叠时长）
+                if (homeworkStart < breakEnd && homeworkEnd > breakStart) {
+                    var overlap = Math.min(homeworkEnd, breakEnd) - Math.max(homeworkStart, breakStart);
+                    if (overlap > 0) homeworkEnd += overlap;
+                }
+                // 直接用当前实际时间与作业实际起止时间比较
+                if (currentTotal >= homeworkStart && currentTotal < homeworkEnd) {
+                    currentHomework = homework;
+                    currentIndex = i;
+                    break;
+                }
+                homeworkStart = homeworkEnd;
+            }
+
+            // 检测作业切换，播放提示音
+            if (currentIndex !== lastHomeworkIndex) {
+                if (lastHomeworkIndex >= 0) {
+                    const prevHomework = homeworkList[lastHomeworkIndex];
+                    if (prevHomework) {
+                        // 英语订正和含"自习"的作业静音，其余50%音量
+                        if (prevHomework.subject !== '英语订正' && !prevHomework.subject.includes('自习')) {
+                            alertSound.volume = 0.5;
+                            alertSound.currentTime = 0;
+                            alertSound.play().catch(e => console.log('音频播放失败:', e));
+                        }
+                        // 显示大字提示（含"自习"的作业除外）
+                        if (!prevHomework.subject.includes('自习')) {
+                            showHomeworkDoneAlert(prevHomework.subject);
+                        }
+                    }
+                }
+                lastHomeworkIndex = currentIndex;
+            }
+
+            // 所有作业完成
+            if (!currentHomework) {
+                if (lastHomeworkIndex !== -2) {
+                    lastHomeworkIndex = -2;
+                    // 1分钟后弹出提示
+                    if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
+                    nightFinishedTimer = setTimeout(() => {
+                        alert("请及时关闭电脑！");
+                    }, 60 * 1000);
+                }
+                subjectEl.textContent = 'Finished！All of you are perfect！';
+                rangeEl.textContent = '';
+                return;
+            }
+
+            subjectEl.textContent = currentHomework.subject;
+            rangeEl.textContent = `${formatTime(homeworkStart)}～${formatTime(originalEnd)}`;
+        }
+
+        function formatTime(totalMinutes) {
+            const h = Math.floor(totalMinutes / 60);
+            const m = totalMinutes % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+
+        // 显示作业完成大字提示
+        function showHomeworkDoneAlert(subject) {
+            const overlay = document.getElementById('homeworkDoneOverlay');
+            const subjectEl = document.getElementById('homeworkDoneSubject');
+            if (!overlay || !subjectEl) return;
+            subjectEl.textContent = subject;
+            overlay.classList.remove('hidden');
+            // 触发回流后添加 active 类以显示虚化背景
+            requestAnimationFrame(() => {
+                overlay.classList.add('active');
+            });
+            setTimeout(() => {
+                overlay.classList.remove('active');
+                overlay.classList.add('hidden');
+            }, 5000);
+        }
+
+        // ==================== 全屏相关 ====================
+        function toggleFullscreen() {
+            if (document.fullscreenElement) exitFullscreen();
+            else requestFullscreen();
+        }
+
+        function requestFullscreen() {
+            const elem = document.documentElement;
+            if (elem.requestFullscreen) elem.requestFullscreen();
+            else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+            else if (elem.msRequestFullscreen) elem.msRequestFullscreen();
+        }
+
+        function exitFullscreen() {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            else if (document.msExitFullscreen) document.msExitFullscreen();
+        }
+
+        function updateFullscreenButton() {
+            const isFullscreen = !!document.fullscreenElement;
+            const btns = [
+                { btn: 'fullscreenBtn', text: 'fullscreenText' },
+                { btn: 'examFullscreenBtn', text: 'examFullscreenText' }
+            ];
+            btns.forEach(item => {
+                const btn = document.getElementById(item.btn);
+                const text = document.getElementById(item.text);
+                if (btn && text) {
+                    const icon = btn.querySelector('i');
+                    if (isFullscreen) {
+                        text.textContent = '退出全屏';
+                        if (icon) icon.className = 'fa fa-compress mr-2';
+                    } else {
+                        text.textContent = '进入全屏';
+                        if (icon) icon.className = 'fa fa-expand mr-2';
+                    }
+                }
+            });
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && document.fullscreenElement) exitFullscreen();
+        });
+
+        // ==================== 噪音监测系统 ====================
+        // 初始化噪音监测（使用Web Audio API + AnalyserNode）
+        async function initNoiseMonitor() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                microphone = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.8;
+                microphone.connect(analyser);
+
+                // 初始化canvas
+                noiseCanvas = document.getElementById('noiseCanvas');
+                if (noiseCanvas) {
+                    noiseCtx = noiseCanvas.getContext('2d');
+                    // 设置canvas实际分辨率
+                    const rect = noiseCanvas.parentElement.getBoundingClientRect();
+                    noiseCanvas.width = rect.width * window.devicePixelRatio;
+                    noiseCanvas.height = rect.height * window.devicePixelRatio;
+                    noiseCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+                }
+
+                // 使用 requestAnimationFrame 实现最流畅的实时更新（约60fps）
+                // 数据记录节流：每秒记录一次，避免内存爆炸
+                let noiseLastRecordTime = 0;
+                let noiseAnimFrameId = null;
+                let noiseBuffer = new Float32Array(analyser.fftSize);
+
+                function noiseLoop() {
+                    // 获取噪音值
+                    if (!analyser) { noiseAnimFrameId = requestAnimationFrame(noiseLoop); return; }
+                    analyser.getFloatTimeDomainData(noiseBuffer);
+                    let sum = 0;
+                    for (let i = 0; i < noiseBuffer.length; i++) {
+                        sum += noiseBuffer[i] * noiseBuffer[i];
+                    }
+                    const rms = Math.sqrt(sum / noiseBuffer.length);
+                    const dbFS = 20 * Math.log10(Math.max(rms, 1e-10));
+                    const db = Math.max(0, Math.min(120, Math.round(dbFS + 94)));
+
+                    const elapsed = (Date.now() - noiseStartTime) / 1000;
+
+                    // 跳过前 30 秒的初始化阶段
+                    if (elapsed < 30) {
+                        const levelText = document.getElementById('noiseLevelText');
+                        if (levelText) {
+                            levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">校准中…</span>dB`;
+                        }
+                        drawNoiseChart();
+                        noiseAnimFrameId = requestAnimationFrame(noiseLoop);
+                        return;
+                    }
+
+                    // 跳过下课期间（20:20 ~ 20:30）
+                    const now = new Date();
+                    const currentTotal = now.getHours() * 60 + now.getMinutes();
+                    const breakStart = 20 * 60 + 20;
+                    const breakEnd = 20 * 60 + 30;
+                    if (currentTotal >= breakStart && currentTotal < breakEnd) {
+                        const levelText = document.getElementById('noiseLevelText');
+                        if (levelText) {
+                            levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">课间休息</span>`;
+                        }
+                        drawNoiseChart();
+                        noiseAnimFrameId = requestAnimationFrame(noiseLoop);
+                        return;
+                    }
+
+                    // 放学前5分钟（21:40）停止监测
+                    const monitorEnd = 21 * 60 + 40;
+                    if (currentTotal >= monitorEnd) {
+                        const levelText = document.getElementById('noiseLevelText');
+                        if (levelText) {
+                            levelText.innerHTML = `监测已结束`;
+                        }
+                        // 隐藏安静提示
+                        const warningText = document.getElementById('noiseWarningText');
+                        if (warningText) warningText.classList.add('hidden');
+                        noiseLoudStartTime = 0;
+                        noiseWarningShowTime = 0;
+                        // 停止记录数据，但继续绘制已有图表
+                        drawNoiseChart();
+                        noiseAnimFrameId = requestAnimationFrame(noiseLoop);
+                        return;
+                    }
+
+                    // 每秒记录一次数据点（避免内存爆炸）
+                    const now_ms = Date.now();
+                    if (now_ms - noiseLastRecordTime >= 1000) {
+                        noiseLastRecordTime = now_ms;
+                        noiseData.push({ time: elapsed, db: db });
+                    }
+
+                    // 安静提示逻辑
+                    const warningText = document.getElementById('noiseWarningText');
+                    if (db > 35) {
+                        if (noiseLoudStartTime === 0) {
+                            noiseLoudStartTime = Date.now();
+                        } else if (Date.now() - noiseLoudStartTime > 60 * 1000) {
+                            // 持续>35dB超过60秒，显示提示
+                            if (warningText && warningText.classList.contains('hidden')) {
+                                warningText.classList.remove('hidden');
+                                noiseWarningShowTime = Date.now();
+                            }
+                            // 如果提示已显示超过20秒，取消提示
+                            if (noiseWarningShowTime > 0 && Date.now() - noiseWarningShowTime > 20 * 1000) {
+                                warningText.classList.add('hidden');
+                                noiseWarningShowTime = 0;
+                                noiseLoudStartTime = 0;
+                            }
+                        }
+                    } else {
+                        if (warningText) warningText.classList.add('hidden');
+                        noiseLoudStartTime = 0;
+                        noiseWarningShowTime = 0;
+                    }
+
+                    // 实时更新文字显示（每0.5秒节流一次）
+                    if (now_ms - noiseLastDisplayTime >= 500) {
+                        noiseLastDisplayTime = now_ms;
+                        const levelText = document.getElementById('noiseLevelText');
+                        if (levelText) {
+                            let color = '#22c55e'; // 绿色 <=20（安静）
+                            if (db > 35) color = '#ef4444'; // 红色 >35（吵闹）
+                            else if (db > 20) color = '#eab308'; // 黄色 21-35（正常）
+                            levelText.innerHTML = `当前噪音：<span style="color:${color}">${db}</span>dB`;
+                        }
+                    }
+
+                    // 实时绘制图表
+                    drawNoiseChart();
+
+                    noiseAnimFrameId = requestAnimationFrame(noiseLoop);
+                }
+
+                // 启动动画循环
+                noiseAnimFrameId = requestAnimationFrame(noiseLoop);
+
+                // 保存 animFrameId 以便清理
+                noiseMonitorInterval = noiseAnimFrameId;
+            } catch (e) {
+                console.log('麦克风初始化失败:', e);
+                const levelText = document.getElementById('noiseLevelText');
+                if (levelText) levelText.textContent = '当前噪音：麦克风不可用';
+            }
+        }
+
+        // 获取当前噪音分贝值（使用时域数据 + 校准偏移量）
+        function getNoiseLevel() {
+            if (!analyser) return 0;
+            // 使用时域 Float32 数据（-1 ~ 1），比频域数据更准确
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            // 计算 RMS（均方根）
+            let sum = 0;
+            for (let i = 0; i < buffer.length; i++) {
+                sum += buffer[i] * buffer[i];
+            }
+            const rms = Math.sqrt(sum / buffer.length);
+            // 转换为 dBFS，再加校准偏移量映射为近似 dB SPL
+            // 偏移量 94 是标准声学参考值（94 dB SPL = 1 Pa）
+            const dbFS = 20 * Math.log10(Math.max(rms, 1e-10));
+            const dbSPL = Math.round(dbFS + 94);
+            return Math.max(0, Math.min(120, dbSPL));
+        }
+
+        // 更新噪音级别并记录数据
+        function updateNoiseLevel() {
+            const db = getNoiseLevel();
+            const elapsed = (Date.now() - noiseStartTime) / 1000; // 秒
+
+            // 跳过前 30 秒的初始化阶段（麦克风/环境不稳定）
+            if (elapsed < 30) {
+                // 仅更新显示，不记录数据
+                const levelText = document.getElementById('noiseLevelText');
+                if (levelText) {
+                    levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">校准中…</span>dB`;
+                }
+                drawNoiseChart();
+                return;
+            }
+
+            // 跳过下课期间（20:20 ~ 20:30）
+            const now = new Date();
+            const currentTotal = now.getHours() * 60 + now.getMinutes();
+            const breakStart = 20 * 60 + 20;
+            const breakEnd = 20 * 60 + 30;
+            if (currentTotal >= breakStart && currentTotal < breakEnd) {
+                const levelText = document.getElementById('noiseLevelText');
+                if (levelText) {
+                    levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">课间休息</span>`;
+                }
+                drawNoiseChart();
+                return;
+            }
+
+            noiseData.push({ time: elapsed, db: db });
+
+            // 更新文字显示
+            const levelText = document.getElementById('noiseLevelText');
+            if (levelText) {
+                let color = '#22c55e'; // 绿色 <=20（安静）
+                if (db > 35) color = '#ef4444'; // 红色 >35（吵闹）
+                else if (db > 20) color = '#eab308'; // 黄色 21-35（正常）
+                levelText.innerHTML = `当前噪音：<span style="color:${color}">${db}</span>dB`;
+            }
+
+            // 绘制图表
+            drawNoiseChart();
+        }
+
+        // 绘制噪音走势图
+        function drawNoiseChart() {
+            if (!noiseCtx || !noiseCanvas || noiseData.length === 0) return;
+
+            const canvas = noiseCanvas;
+            const ctx = noiseCtx;
+            const w = canvas.width / window.devicePixelRatio;
+            const h = canvas.height / window.devicePixelRatio;
+
+            // 清空画布
+            ctx.clearRect(0, 0, w, h);
+
+            // 固定纵轴：0dB ~ 35dB
+            const displayMin = 0;
+            const displayMax = 35;
+            const displayRange = displayMax - displayMin || 1;
+
+            const padding = { top: 4, bottom: 4, left: 2, right: 2 };
+            const chartW = w - padding.left - padding.right;
+            const chartH = h - padding.top - padding.bottom;
+
+            // 绘制网格线（固定3条：0dB、20dB、35dB）
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.lineWidth = 0.5;
+            const yTicks = [0, 20, 35];
+            yTicks.forEach(db => {
+                const y = padding.top + chartH - ((db - displayMin) / displayRange) * chartH;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(w - padding.right, y);
+                ctx.stroke();
+            });
+
+            // 绘制数据曲线（分段着色）
+            if (noiseData.length >= 2) {
+                // 渐变填充
+                const gradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+                gradient.addColorStop(0, 'rgba(234, 179, 8, 0.3)');
+                gradient.addColorStop(0.57, 'rgba(34, 197, 94, 0.3)');
+                gradient.addColorStop(1, 'rgba(34, 197, 94, 0.02)');
+
+                // 填充路径
+                ctx.beginPath();
+                const firstX = padding.left;
+                const firstY = padding.top + chartH - ((Math.min(noiseData[0].db, 35) - displayMin) / displayRange) * chartH;
+                ctx.moveTo(firstX, firstY);
+
+                for (let i = 1; i < noiseData.length; i++) {
+                    const x = padding.left + (i / (noiseData.length - 1)) * chartW;
+                    const y = padding.top + chartH - ((Math.min(noiseData[i].db, 35) - displayMin) / displayRange) * chartH;
+                    const prevX = padding.left + ((i - 1) / (noiseData.length - 1)) * chartW;
+                    const prevY = padding.top + chartH - ((Math.min(noiseData[i - 1].db, 35) - displayMin) / displayRange) * chartH;
+                    const cpX = (prevX + x) / 2;
+                    ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
+                }
+
+                // 填充区域
+                ctx.lineTo(padding.left + chartW, padding.top + chartH);
+                ctx.lineTo(padding.left, padding.top + chartH);
+                ctx.closePath();
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                // 分段绘制着色线条
+                for (let i = 1; i < noiseData.length; i++) {
+                    const x1 = padding.left + ((i - 1) / (noiseData.length - 1)) * chartW;
+                    const y1_raw = noiseData[i - 1].db;
+                    const x2 = padding.left + (i / (noiseData.length - 1)) * chartW;
+                    const y2_raw = noiseData[i].db;
+
+                    // 截断到35dB
+                    const y1 = padding.top + chartH - ((Math.min(y1_raw, 35) - displayMin) / displayRange) * chartH;
+                    const y2 = padding.top + chartH - ((Math.min(y2_raw, 35) - displayMin) / displayRange) * chartH;
+
+                    // 根据分贝选择颜色
+                    const avgDb = (y1_raw + y2_raw) / 2;
+                    let color;
+                    if (avgDb <= 20) color = '#22c55e';
+                    else if (avgDb <= 35) color = '#eab308';
+                    else color = '#ef4444';
+
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+
+                // 绘制最后一个点
+                const lastI = noiseData.length - 1;
+                const lastX = padding.left + chartW;
+                const lastY = padding.top + chartH - ((Math.min(noiseData[lastI].db, 35) - displayMin) / displayRange) * chartH;
+                const lastDb = noiseData[lastI].db;
+                let lastColor = '#22c55e';
+                if (lastDb > 35) lastColor = '#ef4444';
+                else if (lastDb > 20) lastColor = '#eab308';
+                ctx.beginPath();
+                ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+                ctx.fillStyle = lastColor;
+                ctx.fill();
+            }
+
+            // 绘制Y轴标签
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.font = '9px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('35dB', padding.left, padding.top + 8);
+            ctx.fillText('20dB', padding.left, padding.top + chartH * (1 - 20/35) + 4);
+            ctx.fillText('0dB', padding.left, h - padding.bottom);
+
+            // 绘制X轴时间标签
+            if (noiseData.length >= 2) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+                ctx.font = '8px sans-serif';
+                ctx.textAlign = 'center';
+                const labelCount = Math.min(5, noiseData.length);
+                for (let i = 0; i < labelCount; i++) {
+                    const idx = Math.round((i / (labelCount - 1)) * (noiseData.length - 1));
+                    const x = padding.left + (idx / (noiseData.length - 1)) * chartW;
+                    const realTime = new Date(noiseStartTime + noiseData[idx].time * 1000);
+                    const rHour = realTime.getHours();
+                    const rMin = realTime.getMinutes();
+                    ctx.fillText(`${String(rHour).padStart(2, '0')}:${String(rMin).padStart(2, '0')}`, x, h - padding.bottom + 10);
+                }
+            }
+        }
+
+        // ==================== 噪音报告 ====================
+        function showNoiseReport() {
+            if (noiseData.length === 0) return;
+
+            const dbs = noiseData.map(d => d.db);
+            const maxDb = Math.max(...dbs);
+            const minDb = Math.min(...dbs);
+            const avgDb = Math.round(dbs.reduce((a, b) => a + b, 0) / dbs.length);
+
+            // 显示统计信息
+            const statsEl = document.getElementById('noiseReportStats');
+            if (statsEl) {
+                statsEl.innerHTML = `最大噪音：<span class="stat-max">${maxDb}</span>dB&emsp;&emsp;最小噪音：<span class="stat-min">${minDb}</span>dB&emsp;&emsp;平均噪音：${avgDb}dB`;
+            }
+
+            // 先显示覆盖层，再获取尺寸
+            const overlay = document.getElementById('noiseReportOverlay');
+            overlay.classList.remove('hidden');
+
+            // 延迟一帧确保DOM渲染完成后再绘制
+            requestAnimationFrame(() => {
+                const reportCanvas = document.getElementById('noiseReportCanvas');
+                if (reportCanvas) {
+                    const rect = reportCanvas.parentElement.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) return; // 安全检查
+                    reportCanvas.width = rect.width * window.devicePixelRatio;
+                    reportCanvas.height = rect.height * window.devicePixelRatio;
+                    const rCtx = reportCanvas.getContext('2d');
+                    rCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+                    const w = rect.width;
+                    const h = rect.height;
+
+                    // 清空
+                    rCtx.clearRect(0, 0, w, h);
+
+                    // 固定纵轴：0dB ~ 35dB
+                    const displayMin = 0;
+                    const displayMax = 35;
+                    const displayRange = displayMax - displayMin || 1;
+
+                    const padding = { top: 20, bottom: 30, left: 50, right: 20 };
+                    const chartW = w - padding.left - padding.right;
+                    const chartH = h - padding.top - padding.bottom;
+
+                    // 绘制网格（固定3条刻度线：0dB、20dB、35dB）
+                    rCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                    rCtx.lineWidth = 0.5;
+                    const yTicks = [
+                        { db: 0, label: '0dB' },
+                        { db: 20, label: '20dB' },
+                        { db: 35, label: '35dB' }
+                    ];
+                    rCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                    rCtx.font = '12px sans-serif';
+                    rCtx.textAlign = 'right';
+                    yTicks.forEach(tick => {
+                        const y = padding.top + chartH - ((tick.db - displayMin) / displayRange) * chartH;
+                        rCtx.beginPath();
+                        rCtx.moveTo(padding.left, y);
+                        rCtx.lineTo(w - padding.right, y);
+                        rCtx.stroke();
+                        rCtx.fillText(tick.label, padding.left - 8, y + 4);
+                    });
+
+                    // 绘制X轴时间标签（实际时钟时间）
+                    if (noiseData.length >= 2) {
+                        rCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                        rCtx.font = '11px sans-serif';
+                        rCtx.textAlign = 'center';
+                        const labelCount = Math.min(6, noiseData.length);
+                        for (let i = 0; i < labelCount; i++) {
+                            const idx = Math.round((i / (labelCount - 1)) * (noiseData.length - 1));
+                            const x = padding.left + (idx / (noiseData.length - 1)) * chartW;
+                            const realTime = new Date(noiseStartTime + noiseData[idx].time * 1000);
+                            const rHour = realTime.getHours();
+                            const rMin = realTime.getMinutes();
+                            rCtx.fillText(`${String(rHour).padStart(2, '0')}:${String(rMin).padStart(2, '0')}`, x, h - padding.bottom + 18);
+                        }
+                    }
+
+                    // 绘制分段着色曲线
+                    if (noiseData.length >= 2) {
+                        // 渐变填充（绿色为主）
+                        const gradient = rCtx.createLinearGradient(0, padding.top, 0, padding.top + chartH);
+                        gradient.addColorStop(0, 'rgba(234, 179, 8, 0.3)');
+                        gradient.addColorStop(0.57, 'rgba(34, 197, 94, 0.3)');
+                        gradient.addColorStop(1, 'rgba(34, 197, 94, 0.02)');
+
+                        // 填充路径
+                        rCtx.beginPath();
+                        const firstX = padding.left;
+                        const firstY = padding.top + chartH - ((Math.min(noiseData[0].db, 35) - displayMin) / displayRange) * chartH;
+                        rCtx.moveTo(firstX, firstY);
+                        for (let i = 1; i < noiseData.length; i++) {
+                            const x = padding.left + (i / (noiseData.length - 1)) * chartW;
+                            const y = padding.top + chartH - ((Math.min(noiseData[i].db, 35) - displayMin) / displayRange) * chartH;
+                            const prevX = padding.left + ((i - 1) / (noiseData.length - 1)) * chartW;
+                            const prevY = padding.top + chartH - ((Math.min(noiseData[i - 1].db, 35) - displayMin) / displayRange) * chartH;
+                            const cpX = (prevX + x) / 2;
+                            rCtx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
+                        }
+                        rCtx.lineTo(padding.left + chartW, padding.top + chartH);
+                        rCtx.lineTo(padding.left, padding.top + chartH);
+                        rCtx.closePath();
+                        rCtx.fillStyle = gradient;
+                        rCtx.fill();
+
+                        // 分段绘制着色线条
+                        for (let i = 1; i < noiseData.length; i++) {
+                            const x1 = padding.left + ((i - 1) / (noiseData.length - 1)) * chartW;
+                            const y1_raw = noiseData[i - 1].db;
+                            const x2 = padding.left + (i / (noiseData.length - 1)) * chartW;
+                            const y2_raw = noiseData[i].db;
+
+                            // 截断到35dB
+                            const y1 = padding.top + chartH - ((Math.min(y1_raw, 35) - displayMin) / displayRange) * chartH;
+                            const y2 = padding.top + chartH - ((Math.min(y2_raw, 35) - displayMin) / displayRange) * chartH;
+
+                            // 根据分贝选择颜色
+                            const avgDb = (y1_raw + y2_raw) / 2;
+                            let color;
+                            if (avgDb <= 20) color = '#22c55e';
+                            else if (avgDb <= 35) color = '#eab308';
+                            else color = '#ef4444';
+
+                            rCtx.beginPath();
+                            rCtx.moveTo(x1, y1);
+                            rCtx.lineTo(x2, y2);
+                            rCtx.strokeStyle = color;
+                            rCtx.lineWidth = 2;
+                            rCtx.stroke();
+                        }
+
+                        // 绘制最大值和最小值标记
+                        let maxIdx = 0, minIdx = 0;
+                        for (let i = 1; i < noiseData.length; i++) {
+                            if (noiseData[i].db > noiseData[maxIdx].db) maxIdx = i;
+                            if (noiseData[i].db < noiseData[minIdx].db) minIdx = i;
+                        }
+
+                        // 最大值点
+                        const maxX = padding.left + (maxIdx / (noiseData.length - 1)) * chartW;
+                        const maxY = padding.top + chartH - ((Math.min(noiseData[maxIdx].db, 35) - displayMin) / displayRange) * chartH;
+                        rCtx.beginPath();
+                        rCtx.arc(maxX, maxY, 5, 0, Math.PI * 2);
+                        rCtx.fillStyle = '#ef4444';
+                        rCtx.fill();
+                        rCtx.fillStyle = '#ef4444';
+                        rCtx.font = 'bold 12px sans-serif';
+                        rCtx.textAlign = 'center';
+                        rCtx.fillText(maxDb + 'dB', maxX, maxY - 10);
+
+                        // 最小值点
+                        const minX = padding.left + (minIdx / (noiseData.length - 1)) * chartW;
+                        const minY = padding.top + chartH - ((Math.min(noiseData[minIdx].db, 35) - displayMin) / displayRange) * chartH;
+                        rCtx.beginPath();
+                        rCtx.arc(minX, minY, 5, 0, Math.PI * 2);
+                        rCtx.fillStyle = '#22c55e';
+                        rCtx.fill();
+                        rCtx.fillStyle = '#22c55e';
+                        rCtx.font = 'bold 12px sans-serif';
+                        rCtx.textAlign = 'center';
+                        rCtx.fillText(minDb + 'dB', minX, minY + 18);
+                    }
+                }
+            });
+        }
+
+        function closeNoiseReport() {
+            document.getElementById('noiseReportOverlay').classList.add('hidden');
+        }
+
+        // ==================== 修改当前项任务时长 ====================
+        function openModifyTaskModal() {
+            // 找到当前正在进行的作业索引
+            const now = new Date();
+            const currentTotal = now.getHours() * 60 + now.getMinutes();
+            const startTotal = startTime.hour * 60 + startTime.minute;
+            const breakStart = 20 * 60 + 20;
+            const breakEnd = 20 * 60 + 30;
+
+            if (currentTotal < startTotal) {
+                alert('晚自习尚未开始！');
+                return;
+            }
+
+            let timePassed = currentTotal - startTotal;
+            if (currentTotal >= breakEnd) timePassed -= 10;
+
+            let accumulatedTime = 0;
+            modifyCurrentIndex = -1;
+            for (let i = 0; i < homeworkList.length; i++) {
+                const homework = homeworkList[i];
+                if (timePassed < accumulatedTime + homework.time) {
+                    modifyCurrentIndex = i;
+                    break;
+                }
+                accumulatedTime += homework.time;
+            }
+
+            if (modifyCurrentIndex === -1) {
+                alert('当前没有正在进行的作业！');
+                return;
+            }
+
+            modifyTempTime = homeworkList[modifyCurrentIndex].time;
+            document.getElementById('modifyTaskTimeDisplay').textContent = modifyTempTime;
+            document.getElementById('modifyTaskModal').classList.remove('hidden');
+        }
+
+        function closeModifyTaskModal() {
+            document.getElementById('modifyTaskModal').classList.add('hidden');
+            modifyCurrentIndex = -1;
+        }
+
+        function adjustTaskTime(delta) {
+            modifyTempTime += delta;
+            if (modifyTempTime < 5) modifyTempTime = 5; // 最少5分钟
+            if (modifyTempTime > 180) modifyTempTime = 180; // 最多180分钟
+            document.getElementById('modifyTaskTimeDisplay').textContent = modifyTempTime;
+        }
+
+        function saveTaskTime() {
+            if (modifyCurrentIndex >= 0 && modifyCurrentIndex < homeworkList.length) {
+                homeworkList[modifyCurrentIndex].time = modifyTempTime;
+                // 重新广播更新后的作业时间表给教师端
+                broadcastSchedule();
+            }
+            closeModifyTaskModal();
+        }
+
+        // ==================== ntfy通知系统 ====================
+        // 初始化ntfy EventSource连接
+        function initNtfyConnection() {
+            if (ntfyEventSource) {
+                ntfyEventSource.close();
+                ntfyEventSource = null;
+            }
+            try {
+                ntfyEventSource = new EventSource('https://ntfy.sh/wh12z213_noticeboard/sse');
+                ntfyEventSource.onmessage = function(event) {
+                    handleNtfyMessage(event);
+                };
+                ntfyEventSource.onerror = function(err) {
+                    if (!ntfyConnectionFailed) {
+                        console.warn('ntfy连接出错：', err);
+                        ntfyConnectionFailed = true;
+                    }
+                    // 静默处理，不影响其他功能
+                };
+                ntfyEventSource.onopen = function() {
+                    ntfyConnectionFailed = false;
+                };
+            } catch (e) {
+                console.warn('ntfy初始化失败：', e);
+                ntfyConnectionFailed = true;
+            }
+        }
+
+        // 处理收到的ntfy消息
+        function handleNtfyMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                const notification = {
+                    id: Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                    title: data.title || '新通知',
+                    message: data.message || '',
+                    priority: data.priority || 3,
+                    tags: data.tags || [],
+                    time: new Date(),
+                    read: false
+                };
+                receivedNotifications.unshift(notification);
+                updateNotificationBadge();
+                // 加入弹窗队列
+                notificationQueue.push(notification);
+                if (!isPopupShowing) {
+                    processNotificationQueue();
+                }
+            } catch (e) {
+                console.warn('解析ntfy消息失败：', e);
+            }
+        }
+
+        // 获取优先级对应的颜色、图标和文字
+        function getPriorityInfo(priority) {
+            const map = {
+                1: { color: '#9ca3af', bg: '#f3f4f6', icon: '💤', text: '静默' },
+                2: { color: '#d1d5db', bg: '#f9fafb', icon: '🔕', text: '低' },
+                3: { color: '#3b82f6', bg: '#eff6ff', icon: '🔔', text: '默认' },
+                4: { color: '#f97316', bg: '#fff7ed', icon: '📱', text: '高' },
+                5: { color: '#ef4444', bg: '#fef2f2', icon: '🚨', text: '紧急' }
+            };
+            return map[priority] || map[3];
+        }
+
+        // 处理弹窗队列
+        function processNotificationQueue() {
+            if (notificationQueue.length === 0) {
+                isPopupShowing = false;
+                return;
+            }
+            const notification = notificationQueue.shift();
+            showNotificationPopup(notification);
+        }
+
+        // 显示通知弹窗
+        function showNotificationPopup(notification) {
+            isPopupShowing = true;
+            notification.read = true;
+            updateNotificationBadge();
+
+            const titleEl = document.getElementById('notificationPopupTitle');
+            const subjectTagEl = document.getElementById('notificationSubjectTag');
+            const priorityBadgeEl = document.getElementById('notificationPriorityBadge');
+            const bodyEl = document.getElementById('notificationPopupBody');
+            const ackBtn = document.getElementById('notificationAckBtn');
+
+            titleEl.textContent = notification.title;
+            bodyEl.innerHTML = formatNotificationBodyHtml(notification.message);
+
+            // 科目标签
+            const subject = notification.tags.find(t => t && t.trim() !== '');
+            if (subject) {
+                subjectTagEl.textContent = subject;
+                subjectTagEl.classList.remove('hidden');
+            } else {
+                subjectTagEl.classList.add('hidden');
+            }
+
+            // 优先级标识
+            const pInfo = getPriorityInfo(notification.priority);
+            priorityBadgeEl.textContent = pInfo.icon + ' ' + pInfo.text;
+            priorityBadgeEl.style.color = pInfo.color;
+            priorityBadgeEl.style.background = pInfo.bg;
+
+            // 显示弹窗
+            document.getElementById('notificationPopupOverlay').classList.remove('hidden');
+
+            // 倒计时
+            notificationAckCountdown = 20;
+            ackBtn.textContent = '已知晓（' + notificationAckCountdown + '）';
+            if (notificationCountdownInterval) clearInterval(notificationCountdownInterval);
+            notificationCountdownInterval = setInterval(function() {
+                notificationAckCountdown--;
+                ackBtn.textContent = '已知晓（' + notificationAckCountdown + '）';
+                if (notificationAckCountdown <= 0) {
+                    clearInterval(notificationCountdownInterval);
+                    notificationCountdownInterval = null;
+                    acknowledgeNotification();
+                }
+            }, 1000);
+        }
+
+        // 点击已知晓按钮
+        function acknowledgeNotification() {
+            if (notificationCountdownInterval) {
+                clearInterval(notificationCountdownInterval);
+                notificationCountdownInterval = null;
+            }
+            closeNotificationPopup();
+        }
+
+        // 关闭弹窗
+        function closeNotificationPopup() {
+            document.getElementById('notificationPopupOverlay').classList.add('hidden');
+            // 延迟后处理队列下一条
+            setTimeout(function() {
+                processNotificationQueue();
+            }, 300);
+        }
+
+        // 将通知正文中的附件标记转换为超链接 HTML
+        // 发送端格式：📎 文件名（大小）|shareUrl
+        function formatNotificationBodyHtml(message) {
+            if (!message) return '';
+            // 逐行处理，一行中可能有多个 "文字|url" 片段
+            var lines = message.split('\n');
+            var result = '';
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
+                var lineResult = '';
+                var lastIdx = 0;
+                while (true) {
+                    var pipeIdx = line.indexOf('|http', lastIdx);
+                    if (pipeIdx === -1) break;
+                    // 找到 URL 的结束位置（下一个空格或行尾）
+                    var urlStart = pipeIdx + 1;
+                    var urlEnd = urlStart;
+                    while (urlEnd < line.length && line[urlEnd] !== ' ' && line[urlEnd] !== '\t') {
+                        urlEnd++;
+                    }
+                    // | 前面的文字作为超链接显示文字
+                    var linkText = line.substring(lastIdx, pipeIdx);
+                    var url = line.substring(urlStart, urlEnd);
+                    lineResult += '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="color:#3b82f6;text-decoration:underline;">' + escapeHtml(linkText) + '</a>';
+                    lastIdx = urlEnd;
+                }
+                // 添加剩余普通文字
+                lineResult += escapeHtml(line.substring(lastIdx));
+                result += lineResult;
+                if (i < lines.length - 1) result += '<br>';
+            }
+            return result;
+        }
+
+        // 用于摘要：移除 URL 部分并截断
+        function getNotificationSummary(message, maxLen) {
+            if (!message) return '';
+            var lines = message.split('\n');
+            var cleaned = '';
+            for (var i = 0; i < lines.length; i++) {
+                var pipeIdx = lines[i].indexOf('|https://');
+                if (pipeIdx === -1) pipeIdx = lines[i].indexOf('|http://');
+                if (pipeIdx !== -1) {
+                    cleaned += lines[i].substring(0, pipeIdx);
+                } else {
+                    cleaned += lines[i];
+                }
+                if (i < lines.length - 1) cleaned += ' ';
+            }
+            if (cleaned.length > maxLen) {
+                return cleaned.substring(0, maxLen) + '...';
+            }
+            return cleaned;
+        }
+
+        function escapeHtml(str) {
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // 更新通知按钮上的未读数量
+        function updateNotificationBadge() {
+            const unreadCount = receivedNotifications.filter(n => !n.read).length;
+            const badge = document.getElementById('notificationBadge');
+            if (unreadCount > 0) {
+                badge.textContent = unreadCount;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        // 切换通知列表面板
+        function toggleNotificationList() {
+            const panel = document.getElementById('notificationListPanel');
+            if (notificationListOpen) {
+                panel.classList.add('hidden');
+                notificationListOpen = false;
+            } else {
+                renderNotificationList();
+                panel.classList.remove('hidden');
+                notificationListOpen = true;
+            }
+        }
+
+        // 渲染通知列表
+        function renderNotificationList() {
+            const body = document.getElementById('notificationListBody');
+            const totalCountEl = document.getElementById('notificationTotalCount');
+            totalCountEl.textContent = receivedNotifications.length;
+
+            if (receivedNotifications.length === 0) {
+                body.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.5);padding:2rem 0;font-size:0.9rem;">暂无通知</div>';
+                return;
+            }
+
+            body.innerHTML = '';
+            receivedNotifications.forEach(function(n) {
+                const card = document.createElement('div');
+                card.className = 'notification-card';
+                const pInfo = getPriorityInfo(n.priority);
+                card.style.borderLeftColor = pInfo.color;
+
+                const subject = n.tags.find(t => t && t.trim() !== '');
+                let summary = getNotificationSummary(n.message, 15);
+
+                const titleHtml = '<div class="notification-card-title">' +
+                    (subject ? '<span class="notification-subject-tag" style="font-size:0.7rem;padding:0.15rem 0.5rem;">' + subject + '</span>' : '') +
+                    '<span>' + n.title + '</span>' +
+                    '<span style="margin-left:auto;font-size:0.75rem;color:' + pInfo.color + ';">' + pInfo.icon + ' ' + pInfo.text + '</span>' +
+                    '</div>';
+                card.innerHTML = titleHtml +
+                    '<div class="notification-card-summary">' + summary + '</div>' +
+                    '<div class="notification-card-time">' + formatNotifTime(n.time) + '</div>';
+                card.onclick = function() { showNotificationDetail(n.id); };
+                body.appendChild(card);
+            });
+        }
+
+        // 格式化通知时间为 HH:MM:SS
+        function formatNotifTime(date) {
+            const d = new Date(date);
+            const h = String(d.getHours()).padStart(2, '0');
+            const m = String(d.getMinutes()).padStart(2, '0');
+            const s = String(d.getSeconds()).padStart(2, '0');
+            return h + ':' + m + ':' + s;
+        }
+
+        // 显示通知详情
+        function showNotificationDetail(id) {
+            const n = receivedNotifications.find(x => x.id === id);
+            if (!n) return;
+
+            const titleEl = document.getElementById('notificationDetailTitle');
+            const subjectTagEl = document.getElementById('notificationDetailSubjectTag');
+            const priorityBadgeEl = document.getElementById('notificationDetailPriorityBadge');
+            const bodyEl = document.getElementById('notificationDetailBody');
+
+            titleEl.textContent = n.title;
+            bodyEl.innerHTML = formatNotificationBodyHtml(n.message);
+
+            const subject = n.tags.find(t => t && t.trim() !== '');
+            if (subject) {
+                subjectTagEl.textContent = subject;
+                subjectTagEl.classList.remove('hidden');
+            } else {
+                subjectTagEl.classList.add('hidden');
+            }
+
+            const pInfo = getPriorityInfo(n.priority);
+            priorityBadgeEl.textContent = pInfo.icon + ' ' + pInfo.text;
+            priorityBadgeEl.style.color = pInfo.color;
+            priorityBadgeEl.style.background = pInfo.bg;
+
+            document.getElementById('notificationDetailOverlay').classList.remove('hidden');
+        }
+
+        // 关闭通知详情
+        function closeNotificationDetail(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('notificationDetailOverlay').classList.add('hidden');
+        }
+
+        // 面板外点击关闭通知列表
+        document.addEventListener('click', function(e) {
+            const panel = document.getElementById('notificationListPanel');
+            const btn = document.getElementById('notificationListBtn');
+            if (notificationListOpen && panel && btn &&
+                !panel.contains(e.target) && !btn.contains(e.target)) {
+                panel.classList.add('hidden');
+                notificationListOpen = false;
+            }
+        });
+
+        // 更新历史弹窗
+        function showChangelog() {
+            document.getElementById('changelogOverlay').classList.remove('hidden');
+        }
+        function hideChangelog() {
+            document.getElementById('changelogOverlay').classList.add('hidden');
+        }
+        // 点击弹窗外部关闭
+        document.getElementById('changelogOverlay').addEventListener('click', function(e) {
+            if (e.target === this) hideChangelog();
+        });
+    </script>
+
+    <!-- 更新历史按钮 -->
+    <button class="changelog-btn" onclick="showChangelog()">📜 更新历史</button>
+
+    <!-- 问题反馈按钮 -->
+    <a href="https://www.wenjuan.com/s/YVVRJbz/" target="_blank" class="feedback-btn">💬 问题反馈</a>
+
+    <!-- 版本号标注 -->
+    <div class="version-label">当前版本：v1.5.5</div>
+
+    <!-- 更新历史弹窗 -->
+    <div id="changelogOverlay" class="changelog-overlay hidden">
+        <div class="changelog-panel">
+            <h2>📜 晚自习计时系统 — 更新历史<button class="changelog-close" onclick="hideChangelog()">&times;</button></h2>
+
+            <h3>v1.5.5</h3>
+            <ul>
+                <li>新增"智能选座系统"托盘按钮，可快速打开班级排座系统</li>
+                <li>优化座位表导出格式，与原始模板完全一致</li>
+                <li>新增大屏端选座功能，支持学习之星和进步之星在大屏上选座</li>
+            </ul>
+
+            <h3>v1.5.4</h3>
+            <ul>
+                <li>时间表上传数据库增加重试机制：最多重试10次，每次超时20秒</li>
+                <li>10次重试全部失败后自动改用 ntfy.sh 上传</li>
+                <li>上传过程显示实时状态提示</li>
+            </ul>
+
+            <h3>v1.5.3</h3>
+            <ul>
+                <li>每次打开系统端时自动清除数据库中非当天的时间表</li>
+            </ul>
+
+            <h3>v1.5.2</h3>
+            <ul>
+                <li>优化课间休息显示逻辑：跨下课项目的预计时间分三行显示（第一段时间、☕ 课间休息、第二段时间）</li>
+                <li>无跨下课项目时，课间休息作为独立行显示在前后两项作业之间</li>
+            </ul>
+
+            <h3>v1.5.1</h3>
+            <ul>
+                <li>作业编辑表格新增"预计时间"列，实时显示每项作业的开始-结束时间（考虑课间休息顺延）</li>
+                <li>作业表格自动插入课间休息行（20:20-20:30），直观展示休息时间对整体进度的影响</li>
+            </ul>
+
+            <h3>v1.5.0</h3>
+            <ul>
+                <li>新增 Netlify Function 反向代理：所有 Supabase 请求经由 Netlify 服务器中转，大幅提升国内访问速度</li>
+                <li>移除前端 Supabase API Key 暴露，认证逻辑移至服务器端</li>
+            </ul>
+
+            <h3>v1.4.1</h3>
+            <ul>
+                <li>优化 20:20～20:30 下课时间逻辑：按实际重叠时长自动延长跨越下课时间的作业计时</li>
+                <li>作业时间显示改为原始计划开始/结束时间，不受下课延长影响</li>
+            </ul>
+
+            <h3>v1.4.0</h3>
+            <ul>
+                <li>时间表自动保存至 Supabase 数据库</li>
+                <li>保存时自动清除非当日旧数据</li>
+                <li>保存成功/失败状态提示（页面顶部，4秒消失）</li>
+                <li>修改请求支持数据库方式（5秒轮询）</li>
+                <li>确认/忽略修改请求时同步更新数据库</li>
+                <li>页面加载时从数据库读取当日时间表</li>
+                <li>数据库失败时自动回退到 ntfy.sh</li>
+            </ul>
+
+            <h3>v1.3.9</h3>
+            <ul>
+                <li>班级信息更新为高二（13）班</li>
+            </ul>
+
+            <h3>v1.3.8</h3>
+            <ul>
+                <li>右下角新增"问题反馈"按钮，链接指向问卷反馈</li>
+            </ul>
+
+            <h3>v1.3.7</h3>
+            <ul>
+                <li>"保存作业"时自动广播作业时间表到教师端，无需等到开始计时</li>
+            </ul>
+
+            <h3>v1.3.6</h3>
+            <ul>
+                <li>更新历史弹窗标题滚动时固定</li>
+                <li>修复关闭按钮在滚动时移出弹窗的问题</li>
+                <li>新增左下角"更新历史"按钮及弹窗</li>
+            </ul>
+
+            <h3>v1.3.5</h3>
+            <ul>
+                <li>确认更改后自动替换整个作业列表并重新广播</li>
+                <li>保存后自动重新广播时间表</li>
+            </ul>
+
+            <h3>v1.3.4</h3>
+            <ul>
+                <li>新增对比视图弹窗（左右对比"当前安排"与"新安排"，变更项黄色高亮、紫色加粗）</li>
+                <li>新增"忽略 / 确认更改"交互按钮</li>
+            </ul>
+
+            <h3>v1.3.3</h3>
+            <ul>
+                <li>新增修改请求 SSE 订阅</li>
+                <li>新增 handleModifyRequest() 解析修改请求数据</li>
+            </ul>
+
+            <h3>v1.3.2</h3>
+            <ul>
+                <li>新增"开始计时时广播作业列表到教师端"功能</li>
+            </ul>
+
+            <h3>v1.2.6</h3>
+            <ul>
+                <li>修复附件重复显示问题（| 前文字同时作为普通文字和超链接）</li>
+                <li>多附件分行显示支持</li>
+            </ul>
+
+            <h3>v1.2.5</h3>
+            <ul>
+                <li>新增附件超链接渲染（解析 文字|URL 格式为可点击链接）</li>
+            </ul>
+
+            <h3>v1.2.4</h3>
+            <ul>
+                <li>新增通知队列机制（多条通知按序弹出）</li>
+                <li>新增通知摘要生成（移除 URL 后截断 15 字）</li>
+            </ul>
+
+            <h3>v1.2.3</h3>
+            <ul>
+                <li>新增通知详情覆盖层（点击卡片查看完整内容）</li>
+                <li>新增通知列表面板（右侧滑出，未读红色角标）</li>
+            </ul>
+
+            <h3>v1.2.2</h3>
+            <ul>
+                <li>新增通知弹窗系统（自动弹出 + 20 秒倒计时 + 手动"已知晓"确认）</li>
+            </ul>
+
+            <h3>v1.2.1</h3>
+            <ul>
+                <li>集成 ntfy SSE 实时通知接收</li>
+            </ul>
+
+            <h3>v1.1.2</h3>
+            <ul>
+                <li>新增"修改当前项任务时长"按钮（计时模式下，步进 ±5 分钟，范围 5～180 分钟）</li>
+            </ul>
+
+            <h3>v1.1.1</h3>
+            <ul>
+                <li>新增噪音报告功能（放学后自动生成噪音统计图表，含平均值、峰值、超标次数）</li>
+            </ul>
+
+            <h3>v1.1.0.1</h3>
+            <ul>
+                <li>新增噪音监测可视化面板（实时音量条）</li>
+            </ul>
+
+            <h3>v1.1.0</h3>
+            <ul>
+                <li>新增噪音实时监测功能<span style="font-family:'KaiTi','STKaiti','楷体',serif;background:linear-gradient(90deg,#ff69b4,#da70d6,#ff69b4,#ba55d3,#ff69b4);background-size:300% auto;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:shimmer 3s linear infinite;">（idea by：尹吴子恒）</span></li>
+            </ul>
+
+            <h3>v1.0.1</h3>
+            <ul>
+                <li>修复编辑模式下作业项目超过 3 项时"保存作业"按钮不可见的问题</li>
+            </ul>
+
+            <h3>v1.0.0</h3>
+            <ul>
+                <li>主菜单界面：晚自习计时 / 考试计时两个入口</li>
+                <li>作业编辑模式：添加/删除作业项目、选择科目、设置完成用时</li>
+                <li>开始时间设置弹窗（数字键盘输入小时/分钟）</li>
+                <li>计时模式：实时显示当前时间（时:分:秒）、当前科目、时间范围</li>
+                <li>作业自动切换：根据累计用时自动识别当前进行中的作业</li>
+                <li>作业切换提示音</li>
+                <li>励志名言系统</li>
+                <li>全屏模式切换</li>
+                <li>考试计时模式（倒计时 + 考试时长设置弹窗）</li>
+                <li>课间休息识别（20:20～20:30）</li>
+                <li>毛玻璃风格 UI 设计，班级图标 + 标题"高一（13）班高效晚自习"</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
