@@ -21,7 +21,7 @@
         }
 
         /* 7. 所有按钮类元素禁用双击缩放，保证即时响应（含可滚动区域 editMode 内的按钮） */
-        button, .feedback-btn, .triangle-btn, .noise-report-close-btn, .changelog-btn,
+        button, .triangle-btn, .noise-report-close-btn, .changelog-btn,
         .menu-btn, .modify-task-btn, .adjust-circle-btn, .notification-ack-btn,
         .notification-list-btn, .glass-effect {
             touch-action: manipulation;
@@ -29,7 +29,7 @@
 
         /* 2. 超快过渡（覆盖原有 0.3s，改为 0.05s） */
         .menu-btn, .modify-task-btn, .adjust-circle-btn, .notification-ack-btn,
-        .notification-list-btn, .changelog-btn, .feedback-btn, .noise-report-close-btn,
+        .notification-list-btn, .changelog-btn, .noise-report-close-btn,
         .triangle-btn {
             transition: all 0.05s ease !important;
         }
@@ -37,7 +37,6 @@
         /* 3. 为缺少 :active 状态的按钮补充按压反馈 */
         .triangle-btn:active { opacity: 0.8; }
         .noise-report-close-btn:active { transform: scale(0.95); }
-        .feedback-btn:active { transform: scale(0.95); }
         .glass-effect:active { background: rgba(255, 255, 255, 0.25); }
 
         /* 4. 数字键盘按钮优化 */
@@ -1229,11 +1228,50 @@
         function showNightStudyMode() {
             hideAllModes();
             document.getElementById('editMode').classList.remove('hidden');
+            // 自动加载当天已保存的作业
+            loadTodaySchedule();
+        }
+
+        function loadTodaySchedule() {
+            const today = new Date().toISOString().split('T')[0];
+            DB.getSchedule(today).then(function(schedule) {
+                if (!schedule || !schedule.homework_list || schedule.homework_list.length === 0) return;
+                // 确认是否加载
+                if (!confirm('检测到今日已保存的作业表，是否加载？')) return;
+                // 填充开始时间
+                if (schedule.start_time) {
+                    const parts = schedule.start_time.split(':');
+                    if (parts.length === 2) {
+                        startTime.hour = parseInt(parts[0]);
+                        startTime.minute = parseInt(parts[1]);
+                        updateStartTimeDisplay();
+                    }
+                }
+                // 填充作业列表
+                homeworkList = [];
+                currentRowId = 1;
+                schedule.homework_list.forEach(function(item) {
+                    homeworkList.push({
+                        id: currentRowId++,
+                        subject: item.subject || null,
+                        time: item.time || null
+                    });
+                });
+                updateTableRows();
+            }).catch(function(e) {
+                console.log('加载当日作业失败:', e);
+            });
         }
 
         function backToMenu() {
             clearAllTimers();
             hideAllModes();
+            // 退出全屏
+            if (document.fullscreenElement) {
+                if (document.exitFullscreen) document.exitFullscreen();
+                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                else if (document.msExitFullscreen) document.msExitFullscreen();
+            }
             document.getElementById('mainMenu').classList.remove('hidden');
         }
 
@@ -2039,29 +2077,56 @@
             let currentHomework = null;
             let homeworkStart = startTotal;
             let homeworkEnd = startTotal;
-            let originalEnd = startTotal;
+            let displayStart = startTotal;
+            let displayEnd = startTotal;
             let currentIndex = -1;
+            let inBreak = false; // 当前是否在课间休息期间
 
             for (let i = 0; i < homeworkList.length; i++) {
                 const homework = homeworkList[i];
                 homeworkEnd = homeworkStart + homework.time;
-                originalEnd = homeworkEnd;
+                displayStart = homeworkStart;
+                displayEnd = homeworkEnd;
                 // 作业跨越20:20-20:30下课时间，结束时间顺延（按实际重叠时长）
                 if (homeworkStart < breakEnd && homeworkEnd > breakStart) {
                     var overlap = Math.min(homeworkEnd, breakEnd) - Math.max(homeworkStart, breakStart);
-                    if (overlap > 0) homeworkEnd += overlap;
+                    if (overlap > 0) {
+                        homeworkEnd += overlap;
+                        // 如果作业在下课期间开始，显示开始时间顺延到下课后
+                        if (homeworkStart >= breakStart && homeworkStart < breakEnd) {
+                            displayStart = breakEnd;
+                            displayEnd = breakEnd + homework.time;
+                        } else {
+                            // 跨下课的作业，显示结束时间顺延
+                            displayEnd = homeworkEnd;
+                        }
+                    }
+                } else if (homeworkStart >= breakStart && homeworkStart < breakEnd) {
+                    // 作业正好在课间休息开始，顺延到下课后
+                    homeworkEnd = breakEnd + homework.time;
+                    displayStart = breakEnd;
+                    displayEnd = homeworkEnd;
                 }
                 // 直接用当前实际时间与作业实际起止时间比较
                 if (currentTotal >= homeworkStart && currentTotal < homeworkEnd) {
                     currentHomework = homework;
                     currentIndex = i;
+                    // 检查是否在课间休息期间（作业跨下课且当前时间在课间）
+                    if (currentTotal >= breakStart && currentTotal < breakEnd && homeworkStart < breakStart) {
+                        inBreak = true;
+                    }
                     break;
                 }
                 homeworkStart = homeworkEnd;
             }
 
             // 检测作业切换，播放提示音
-            if (currentIndex !== lastHomeworkIndex) {
+            // 用 effectiveIndex 表示"有效状态"：-2=课间休息，-1=未开始/已结束，>=0=作业索引
+            let effectiveIndex = currentIndex;
+            if (inBreak) effectiveIndex = -2;
+
+            if (effectiveIndex !== lastHomeworkIndex) {
+                // 从前一个作业切换到其他状态（下一个作业/课间休息/结束）
                 if (lastHomeworkIndex >= 0) {
                     const prevHomework = homeworkList[lastHomeworkIndex];
                     if (prevHomework) {
@@ -2077,13 +2142,13 @@
                         }
                     }
                 }
-                lastHomeworkIndex = currentIndex;
+                lastHomeworkIndex = effectiveIndex;
             }
 
             // 所有作业完成
             if (!currentHomework) {
-                if (lastHomeworkIndex !== -2) {
-                    lastHomeworkIndex = -2;
+                if (lastHomeworkIndex !== -3) {
+                    lastHomeworkIndex = -3;
                     // 1分钟后弹出提示
                     if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
                     nightFinishedTimer = setTimeout(() => {
@@ -2096,7 +2161,11 @@
             }
 
             subjectEl.textContent = currentHomework.subject;
-            rangeEl.textContent = `${formatTime(homeworkStart)}～${formatTime(originalEnd)}`;
+            if (inBreak) {
+                rangeEl.textContent = '☕ 课间休息 20:20～20:30';
+            } else {
+                rangeEl.textContent = `${formatTime(displayStart)}～${formatTime(displayEnd)}`;
+            }
         }
 
         function formatTime(totalMinutes) {
@@ -2263,11 +2332,11 @@
 
                     // 安静提示逻辑
                     const warningText = document.getElementById('noiseWarningText');
-                    if (db > 35) {
+                    if (db > 45) {
                         if (noiseLoudStartTime === 0) {
                             noiseLoudStartTime = Date.now();
                         } else if (Date.now() - noiseLoudStartTime > 60 * 1000) {
-                            // 持续>35dB超过60秒，显示提示
+                            // 持续>45dB超过60秒，显示提示
                             if (warningText && warningText.classList.contains('hidden')) {
                                 warningText.classList.remove('hidden');
                                 noiseWarningShowTime = Date.now();
@@ -2369,10 +2438,12 @@
             // 更新文字显示
             const levelText = document.getElementById('noiseLevelText');
             if (levelText) {
-                let color = '#22c55e'; // 绿色 <=20（安静）
-                if (db > 35) color = '#ef4444'; // 红色 >35（吵闹）
-                else if (db > 20) color = '#eab308'; // 黄色 21-35（正常）
-                levelText.innerHTML = `当前噪音：<span style="color:${color}">${db}</span>dB`;
+                let color = '#10b981'; // 翠绿 <=30（安静）
+                let fontWeight = '600';
+                if (db > 50) { color = '#8b5cf6'; fontWeight = '800'; } // 紫色 >50（很吵）
+                else if (db > 40) { color = '#f59e0b'; fontWeight = '700'; } // 橙色 41-50（偏吵）
+                else if (db > 30) { color = '#3b82f6'; fontWeight = '600'; } // 蓝色 31-40（正常）
+                levelText.innerHTML = `当前噪音：<span style="color:${color};font-weight:${fontWeight};font-size:1.2em">${db}</span>dB`;
             }
 
             // 绘制图表
@@ -2391,46 +2462,63 @@
             // 清空画布
             ctx.clearRect(0, 0, w, h);
 
-            // 固定纵轴：0dB ~ 35dB
-            const displayMin = 0;
-            const displayMax = 35;
+            // 动态计算纵轴范围：根据最近的数据自动调整
+            const recentData = noiseData.slice(-300); // 最近5分钟
+            let maxDb = Math.max(...recentData.map(d => d.db));
+            let minDb = Math.min(...recentData.map(d => d.db));
+            // 确保最小范围为20dB，最大上限80dB
+            if (maxDb - minDb < 20) {
+                const mid = (maxDb + minDb) / 2;
+                maxDb = mid + 10;
+                minDb = mid - 10;
+            }
+            minDb = Math.max(0, Math.floor(minDb / 5) * 5 - 5);
+            maxDb = Math.min(80, Math.ceil(maxDb / 5) * 5 + 5);
+            const displayMin = minDb;
+            const displayMax = maxDb;
             const displayRange = displayMax - displayMin || 1;
 
             const padding = { top: 4, bottom: 4, left: 2, right: 2 };
             const chartW = w - padding.left - padding.right;
             const chartH = h - padding.top - padding.bottom;
 
-            // 绘制网格线（固定3条：0dB、20dB、35dB）
+            // 绘制网格线（动态，4条均匀分布）
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
             ctx.lineWidth = 0.5;
-            const yTicks = [0, 20, 35];
-            yTicks.forEach(db => {
+            const tickCount = 4;
+            for (let t = 0; t <= tickCount; t++) {
+                const db = displayMin + (displayRange * t / tickCount);
                 const y = padding.top + chartH - ((db - displayMin) / displayRange) * chartH;
                 ctx.beginPath();
                 ctx.moveTo(padding.left, y);
                 ctx.lineTo(w - padding.right, y);
                 ctx.stroke();
-            });
+                // 标注分贝值
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.font = '10px sans-serif';
+                ctx.fillText(Math.round(db) + 'dB', padding.left + 2, y - 2);
+            }
 
             // 绘制数据曲线（分段着色）
             if (noiseData.length >= 2) {
                 // 渐变填充
                 const gradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
-                gradient.addColorStop(0, 'rgba(234, 179, 8, 0.3)');
-                gradient.addColorStop(0.57, 'rgba(34, 197, 94, 0.3)');
-                gradient.addColorStop(1, 'rgba(34, 197, 94, 0.02)');
+                gradient.addColorStop(0, 'rgba(139, 92, 246, 0.4)');
+                gradient.addColorStop(0.3, 'rgba(59, 130, 246, 0.3)');
+                gradient.addColorStop(0.6, 'rgba(16, 185, 129, 0.3)');
+                gradient.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
 
                 // 填充路径
                 ctx.beginPath();
                 const firstX = padding.left;
-                const firstY = padding.top + chartH - ((Math.min(noiseData[0].db, 35) - displayMin) / displayRange) * chartH;
+                const firstY = padding.top + chartH - ((Math.min(noiseData[0].db, displayMax) - displayMin) / displayRange) * chartH;
                 ctx.moveTo(firstX, firstY);
 
                 for (let i = 1; i < noiseData.length; i++) {
                     const x = padding.left + (i / (noiseData.length - 1)) * chartW;
-                    const y = padding.top + chartH - ((Math.min(noiseData[i].db, 35) - displayMin) / displayRange) * chartH;
+                    const y = padding.top + chartH - ((Math.min(noiseData[i].db, displayMax) - displayMin) / displayRange) * chartH;
                     const prevX = padding.left + ((i - 1) / (noiseData.length - 1)) * chartW;
-                    const prevY = padding.top + chartH - ((Math.min(noiseData[i - 1].db, 35) - displayMin) / displayRange) * chartH;
+                    const prevY = padding.top + chartH - ((Math.min(noiseData[i - 1].db, displayMax) - displayMin) / displayRange) * chartH;
                     const cpX = (prevX + x) / 2;
                     ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
                 }
@@ -2449,16 +2537,17 @@
                     const x2 = padding.left + (i / (noiseData.length - 1)) * chartW;
                     const y2_raw = noiseData[i].db;
 
-                    // 截断到35dB
-                    const y1 = padding.top + chartH - ((Math.min(y1_raw, 35) - displayMin) / displayRange) * chartH;
-                    const y2 = padding.top + chartH - ((Math.min(y2_raw, 35) - displayMin) / displayRange) * chartH;
+                    // 截断到 displayMax
+                    const y1 = padding.top + chartH - ((Math.min(y1_raw, displayMax) - displayMin) / displayRange) * chartH;
+                    const y2 = padding.top + chartH - ((Math.min(y2_raw, displayMax) - displayMin) / displayRange) * chartH;
 
-                    // 根据分贝选择颜色
+                    // 根据分贝选择颜色（不用红色）
                     const avgDb = (y1_raw + y2_raw) / 2;
                     let color;
-                    if (avgDb <= 20) color = '#22c55e';
-                    else if (avgDb <= 35) color = '#eab308';
-                    else color = '#ef4444';
+                    if (avgDb <= 30) color = '#10b981';      // 翠绿（安静）
+                    else if (avgDb <= 40) color = '#3b82f6';  // 蓝色（正常）
+                    else if (avgDb <= 50) color = '#f59e0b';  // 橙色（偏吵）
+                    else color = '#8b5cf6';                    // 紫色（很吵）
 
                     ctx.beginPath();
                     ctx.moveTo(x1, y1);
@@ -2599,13 +2688,13 @@
                         // 填充路径
                         rCtx.beginPath();
                         const firstX = padding.left;
-                        const firstY = padding.top + chartH - ((Math.min(noiseData[0].db, 35) - displayMin) / displayRange) * chartH;
+                        const firstY = padding.top + chartH - ((Math.min(noiseData[0].db, displayMax) - displayMin) / displayRange) * chartH;
                         rCtx.moveTo(firstX, firstY);
                         for (let i = 1; i < noiseData.length; i++) {
                             const x = padding.left + (i / (noiseData.length - 1)) * chartW;
-                            const y = padding.top + chartH - ((Math.min(noiseData[i].db, 35) - displayMin) / displayRange) * chartH;
+                            const y = padding.top + chartH - ((Math.min(noiseData[i].db, displayMax) - displayMin) / displayRange) * chartH;
                             const prevX = padding.left + ((i - 1) / (noiseData.length - 1)) * chartW;
-                            const prevY = padding.top + chartH - ((Math.min(noiseData[i - 1].db, 35) - displayMin) / displayRange) * chartH;
+                            const prevY = padding.top + chartH - ((Math.min(noiseData[i - 1].db, displayMax) - displayMin) / displayRange) * chartH;
                             const cpX = (prevX + x) / 2;
                             rCtx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
                         }
@@ -2733,6 +2822,8 @@
         function saveTaskTime() {
             if (modifyCurrentIndex >= 0 && modifyCurrentIndex < homeworkList.length) {
                 homeworkList[modifyCurrentIndex].time = modifyTempTime;
+                // 重置作业切换索引，确保下次计时更新时能正确检测状态
+                lastHomeworkIndex = -1;
                 // 重新广播更新后的作业时间表给教师端
                 broadcastSchedule();
             }
@@ -3056,6 +3147,65 @@
         });
 
         // 更新历史弹窗
+
+        // ==================== 版本检测 ====================
+        const CURRENT_VERSION = 'v1.6.0';
+        const GITHUB_VERSION_URL = 'https://raw.githubusercontent.com/wh13z213/study-timer/main/version.txt';
+
+        function checkVersionUpdate() {
+            // 检查是否已忽略此版本
+            const ignoredVersion = localStorage.getItem('ignoredVersion');
+            if (ignoredVersion === 'latest') return; // 永久忽略
+
+            fetch(GITHUB_VERSION_URL, { cache: 'no-store' })
+                .then(response => {
+                    if (!response.ok) throw new Error('版本检查失败');
+                    return response.text();
+                })
+                .then(latestVersion => {
+                    latestVersion = latestVersion.trim();
+                    if (!latestVersion) return;
+                    if (latestVersion === CURRENT_VERSION) return;
+                    if (ignoredVersion === latestVersion) return;
+                    showVersionUpdateModal(latestVersion);
+                })
+                .catch(err => {
+                    console.log('版本检查跳过:', err.message);
+                });
+        }
+
+        function showVersionUpdateModal(latestVersion) {
+            const modal = document.createElement('div');
+            modal.id = 'versionUpdateModal';
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(4px);';
+            modal.innerHTML = `
+                <div style="background:white;border-radius:20px;padding:32px;max-width:420px;width:90%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);text-align:center;">
+                    <div style="font-size:48px;margin-bottom:16px;">🎉</div>
+                    <h3 style="font-size:1.5rem;font-weight:bold;color:#1f2937;margin-bottom:8px;">发现新版本</h3>
+                    <p style="color:#6b7280;margin-bottom:8px;">当前版本：<span style="color:#9ca3af;">${CURRENT_VERSION}</span></p>
+                    <p style="color:#6b7280;margin-bottom:24px;">最新版本：<span style="color:#6366f1;font-weight:600;">${latestVersion}</span></p>
+                    <div style="display:flex;gap:12px;justify-content:center;">
+                        <button onclick="ignoreVersionUpdate('${latestVersion}')" style="padding:12px 24px;border-radius:12px;border:1px solid #e5e7eb;background:white;color:#6b7280;cursor:pointer;font-size:14px;transition:all 0.2s;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">忽略此版本</button>
+                        <button onclick="downloadLatestVersion()" style="padding:12px 24px;border-radius:12px;border:none;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;cursor:pointer;font-size:14px;font-weight:600;transition:all 0.2s;" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">下载更新</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        function ignoreVersionUpdate(version) {
+            localStorage.setItem('ignoredVersion', version);
+            const modal = document.getElementById('versionUpdateModal');
+            if (modal) modal.remove();
+        }
+
+        function downloadLatestVersion() {
+            // 打开下载页面
+            window.open('https://github.com/wh13z213/study-timer/releases/latest', '_blank');
+            const modal = document.getElementById('versionUpdateModal');
+            if (modal) modal.remove();
+        }
+
         function showChangelog() {
             document.getElementById('changelogOverlay').classList.remove('hidden');
         }
@@ -3066,21 +3216,35 @@
         document.getElementById('changelogOverlay').addEventListener('click', function(e) {
             if (e.target === this) hideChangelog();
         });
+    checkVersionUpdate();
     </script>
 
     <!-- 更新历史按钮 -->
     <button class="changelog-btn" onclick="showChangelog()">📜 更新历史</button>
 
-    <!-- 问题反馈按钮 -->
-    <a href="https://www.wenjuan.com/s/YVVRJbz/" target="_blank" class="feedback-btn">💬 问题反馈</a>
 
     <!-- 版本号标注 -->
-    <div class="version-label">当前版本：v1.5.5</div>
+    <div class="version-label">当前版本：v1.6.0</div>
 
     <!-- 更新历史弹窗 -->
     <div id="changelogOverlay" class="changelog-overlay hidden">
         <div class="changelog-panel">
             <h2>📜 晚自习计时系统 — 更新历史<button class="changelog-close" onclick="hideChangelog()">&times;</button></h2>
+
+            <h3>v1.6.0</h3>
+            <ul>
+                <li>修复下课前结束的作业项目无大字提示及提示音的问题</li>
+                <li>修复下课后作业项目开始时间显示错误的问题</li>
+                <li>修复下课后作业结束时无提示的问题</li>
+                <li>修复更改作业时长后结束无提示及显示异常的问题</li>
+                <li>修复右上角返回按钮无反应的问题</li>
+                <li>移除右下角"问题反馈"按钮</li>
+                <li>"修改当前项任务时长"按钮移至底部中间位置</li>
+                <li>优化噪音监测：动态调整图表纵轴范围，适应空调/风扇等环境噪音</li>
+                <li>优化噪音数值显示颜色，更醒目且不使用红色</li>
+                <li>编辑作业项目页面自动读取并填充当天已保存的作业</li>
+                <li>新增版本检测功能，打开时自动检查GitHub最新版本</li>
+            </ul>
 
             <h3>v1.5.5</h3>
             <ul>
