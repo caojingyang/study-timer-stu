@@ -48,6 +48,13 @@
         .num-keyboard button:active {
             transform: scale(0.92);
         }
+        /* 修改任务时长按钮：移至更新历史按钮上方，避免被遮盖 */
+        .modify-task-btn {
+            position: fixed !important;
+            bottom: 4.5rem !important;
+            left: 1.5rem !important;
+            z-index: 15 !important;
+        }
     </style>
 </head>
 <body class="min-h-screen overflow-hidden">
@@ -437,6 +444,17 @@
                 <button onclick="confirmModifyRequest()" style="flex:1;padding:0.8rem;border:none;border-radius:0.75rem;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:1rem;font-weight:700;cursor:pointer;">确认更改</button>
             </div>
         </div>
+    </div>
+
+    <!-- 关机倒计时覆盖层 -->
+    <div id="shutdownOverlay" class="hidden" style="position:fixed;inset:0;background:#000000;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#ffffff;">
+        <div style="font-size:2.5rem;font-weight:bold;margin-bottom:1rem;">放学啦</div>
+        <div id="shutdownCountdownNum" style="font-size:8rem;font-weight:bold;line-height:1;">60</div>
+        <div style="font-size:1.5rem;margin-top:0.5rem;">秒后电脑将自动关机</div>
+        <div id="shutdownProgressBar" style="width:min(400px,80vw);height:6px;background:#333;border-radius:3px;margin-top:2rem;overflow:hidden;">
+            <div id="shutdownProgressFill" style="width:100%;height:100%;background:#6366f1;transition:width 1s linear;"></div>
+        </div>
+        <button id="shutdownCancelBtn" onclick="cancelShutdownCountdown()" style="margin-top:2rem;padding:12px 32px;border-radius:12px;border:1px solid #444;background:#1a1a1a;color:#ccc;cursor:pointer;font-size:1rem;transition:all 0.2s;" onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background='#1a1a1a'">取消关机</button>
     </div>
 
     <!-- 修改当前项任务时长弹窗 -->
@@ -1289,8 +1307,11 @@
             if (examRealTimeInterval) { clearInterval(examRealTimeInterval); examRealTimeInterval = null; }
             if (examQuoteTimer) { clearInterval(examQuoteTimer); examQuoteTimer = null; }
             if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
+            if (shutdownIntervalId) { clearInterval(shutdownIntervalId); shutdownIntervalId = null; }
+            const shutdownOv = document.getElementById('shutdownOverlay');
+            if (shutdownOv) { shutdownOv.classList.add('hidden'); shutdownOv.style.display = 'none'; }
             // 清理噪音监测资源
-            if (noiseMonitorInterval) { cancelAnimationFrame(noiseMonitorInterval); noiseMonitorInterval = null; }
+            if (noiseMonitorInterval) { clearInterval(noiseMonitorInterval); noiseMonitorInterval = null; }
             if (microphone) { microphone.stop(); microphone = null; }
             if (audioContext) { audioContext.close().catch(e => {}); audioContext = null; analyser = null; }
             noiseData = [];
@@ -1738,6 +1759,9 @@
             usedQuoteIndices = [];
             if (quoteTimer) clearInterval(quoteTimer);
             if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
+            if (shutdownIntervalId) { clearInterval(shutdownIntervalId); shutdownIntervalId = null; }
+            const shutdownOv = document.getElementById('shutdownOverlay');
+            if (shutdownOv) { shutdownOv.classList.add('hidden'); shutdownOv.style.display = 'none'; }
 
             document.getElementById('editMode').classList.add('hidden');
             document.getElementById('timerMode').classList.remove('hidden');
@@ -1752,7 +1776,7 @@
             noiseStartTime = Date.now();
             initNoiseMonitor();
 
-            timerInterval = setInterval(updateNightTimer, 1000);
+            timerInterval = setInterval(updateNightTimer, 200);
             updateNightTimer();
             changeQuote();
             quoteTimer = setInterval(changeQuote, 60 * 1000);
@@ -2030,15 +2054,20 @@
             }
         }
 
+        let lastDisplayedSecond = -1;
         function updateNightTimer() {
             const now = new Date();
             const currentHour = now.getHours();
             const currentMinute = now.getMinutes();
             const currentSecond = now.getSeconds();
 
-            document.getElementById('hours').textContent = String(currentHour).padStart(2, '0');
-            document.getElementById('minutes').textContent = String(currentMinute).padStart(2, '0');
-            document.getElementById('seconds').textContent = String(currentSecond).padStart(2, '0');
+            // 仅在秒数变化时更新时钟 DOM，避免高频刷新导致卡顿
+            if (currentSecond !== lastDisplayedSecond) {
+                lastDisplayedSecond = currentSecond;
+                document.getElementById('hours').textContent = String(currentHour).padStart(2, '0');
+                document.getElementById('minutes').textContent = String(currentMinute).padStart(2, '0');
+                document.getElementById('seconds').textContent = String(currentSecond).padStart(2, '0');
+            }
 
             const currentTotal = currentHour * 60 + currentMinute;
             const startTotal = startTime.hour * 60 + startTime.minute;
@@ -2064,6 +2093,14 @@
                     setTimeout(() => {
                         showNoiseReport();
                     }, 10 * 1000);
+                }
+                // 放学后显示关机倒计时（与作业完成不同路径，但同样2分钟后触发）
+                if (!window._shutdownScheduled) {
+                    window._shutdownScheduled = true;
+                    if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
+                    nightFinishedTimer = setTimeout(() => {
+                        showShutdownCountdown();
+                    }, 2 * 60 * 1000);
                 }
                 return;
             }
@@ -2149,10 +2186,10 @@
             if (!currentHomework) {
                 if (lastHomeworkIndex !== -3) {
                     lastHomeworkIndex = -3;
-                    // 1分钟后弹出提示
+                    // 显示关机倒计时覆盖层（黑色背景 + 倒计时）
                     if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
                     nightFinishedTimer = setTimeout(() => {
-                        alert("请及时关闭电脑！");
+                        showShutdownCountdown();
                     }, 60 * 1000);
                 }
                 subjectEl.textContent = 'Finished！All of you are perfect！';
@@ -2259,15 +2296,17 @@
                     noiseCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
                 }
 
-                // 使用 requestAnimationFrame 实现最流畅的实时更新（约60fps）
-                // 数据记录节流：每秒记录一次，避免内存爆炸
+                // 0.5帧/s = 每2秒采样一次，大幅降低 CPU 和内存占用
+                const NOISE_SAMPLE_INTERVAL = 2000;
+                const NOISE_DATA_MAX = 450; // 最大数据点数（15分钟@0.5fps），超出丢弃最旧的
                 let noiseLastRecordTime = 0;
                 let noiseAnimFrameId = null;
                 let noiseBuffer = new Float32Array(analyser.fftSize);
+                let noiseTimerId = null;
 
                 function noiseLoop() {
                     // 获取噪音值
-                    if (!analyser) { noiseAnimFrameId = requestAnimationFrame(noiseLoop); return; }
+                    if (!analyser) return;
                     analyser.getFloatTimeDomainData(noiseBuffer);
                     let sum = 0;
                     for (let i = 0; i < noiseBuffer.length; i++) {
@@ -2286,13 +2325,15 @@
                             levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">校准中…</span>dB`;
                         }
                         drawNoiseChart();
-                        noiseAnimFrameId = requestAnimationFrame(noiseLoop);
                         return;
                     }
 
-                    // 跳过下课期间（20:20 ~ 20:30）
+                    // 晚自习开始前只显示不记录
+                    const startTotal = startTime.hour * 60 + startTime.minute;
                     const now = new Date();
                     const currentTotal = now.getHours() * 60 + now.getMinutes();
+                    
+                    // 跳过下课期间（20:20 ~ 20:30）
                     const breakStart = 20 * 60 + 20;
                     const breakEnd = 20 * 60 + 30;
                     if (currentTotal >= breakStart && currentTotal < breakEnd) {
@@ -2301,7 +2342,6 @@
                             levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">课间休息</span>`;
                         }
                         drawNoiseChart();
-                        noiseAnimFrameId = requestAnimationFrame(noiseLoop);
                         return;
                     }
 
@@ -2312,36 +2352,43 @@
                         if (levelText) {
                             levelText.innerHTML = `监测已结束`;
                         }
-                        // 隐藏安静提示
                         const warningText = document.getElementById('noiseWarningText');
                         if (warningText) warningText.classList.add('hidden');
                         noiseLoudStartTime = 0;
                         noiseWarningShowTime = 0;
-                        // 停止记录数据，但继续绘制已有图表
                         drawNoiseChart();
-                        noiseAnimFrameId = requestAnimationFrame(noiseLoop);
                         return;
                     }
 
-                    // 每秒记录一次数据点（避免内存爆炸）
+                    // 问题4：特定时间段只显示噪音值，不进行记录
+                    // 晚自习开始前、19:00~19:01、19:30~19:31、19:40~19:41、20:30~20:31
+                    const isExcludedTime = (currentTotal < startTotal) ||
+                        (currentTotal >= 19 * 60 && currentTotal < 19 * 60 + 1) ||
+                        (currentTotal >= 19 * 60 + 30 && currentTotal < 19 * 60 + 31) ||
+                        (currentTotal >= 19 * 60 + 40 && currentTotal < 19 * 60 + 41) ||
+                        (currentTotal >= 20 * 60 + 30 && currentTotal < 20 * 60 + 31);
+
+                    // 每2秒记录一次数据点（0.5帧/s）
                     const now_ms = Date.now();
-                    if (now_ms - noiseLastRecordTime >= 1000) {
+                    if (!isExcludedTime && now_ms - noiseLastRecordTime >= NOISE_SAMPLE_INTERVAL) {
                         noiseLastRecordTime = now_ms;
                         noiseData.push({ time: elapsed, db: db });
+                        // 内存优化：超过最大长度时丢弃最旧的数据
+                        if (noiseData.length > NOISE_DATA_MAX) {
+                            noiseData.shift();
+                        }
                     }
 
-                    // 安静提示逻辑
+                    // 安静提示逻辑（仅在非排除时段）
                     const warningText = document.getElementById('noiseWarningText');
-                    if (db > 45) {
+                    if (!isExcludedTime && db > 45) {
                         if (noiseLoudStartTime === 0) {
                             noiseLoudStartTime = Date.now();
                         } else if (Date.now() - noiseLoudStartTime > 60 * 1000) {
-                            // 持续>45dB超过60秒，显示提示
                             if (warningText && warningText.classList.contains('hidden')) {
                                 warningText.classList.remove('hidden');
                                 noiseWarningShowTime = Date.now();
                             }
-                            // 如果提示已显示超过20秒，取消提示
                             if (noiseWarningShowTime > 0 && Date.now() - noiseWarningShowTime > 20 * 1000) {
                                 warningText.classList.add('hidden');
                                 noiseWarningShowTime = 0;
@@ -2354,29 +2401,37 @@
                         noiseWarningShowTime = 0;
                     }
 
-                    // 实时更新文字显示（每0.5秒节流一次）
-                    if (now_ms - noiseLastDisplayTime >= 500) {
-                        noiseLastDisplayTime = now_ms;
-                        const levelText = document.getElementById('noiseLevelText');
-                        if (levelText) {
-                            let color = '#22c55e'; // 绿色 <=20（安静）
-                            if (db > 35) color = '#ef4444'; // 红色 >35（吵闹）
-                            else if (db > 20) color = '#eab308'; // 黄色 21-35（正常）
-                            levelText.innerHTML = `当前噪音：<span style="color:${color}">${db}</span>dB`;
+                    // 更新文字显示（每次采样都更新）
+                    const levelText = document.getElementById('noiseLevelText');
+                    if (levelText) {
+                        if (isExcludedTime) {
+                            // 排除时段：显示噪音值但标注不记录
+                            let color = '#10b981';
+                            let fontWeight = '600';
+                            if (db > 50) { color = '#8b5cf6'; fontWeight = '800'; }
+                            else if (db > 40) { color = '#f59e0b'; fontWeight = '700'; }
+                            else if (db > 30) { color = '#3b82f6'; fontWeight = '600'; }
+                            levelText.innerHTML = `当前噪音：<span style="color:${color};font-weight:${fontWeight};font-size:1.2em">${db}</span>dB`;
+                        } else {
+                            let color = '#10b981';
+                            let fontWeight = '600';
+                            if (db > 50) { color = '#8b5cf6'; fontWeight = '800'; }
+                            else if (db > 40) { color = '#f59e0b'; fontWeight = '700'; }
+                            else if (db > 30) { color = '#3b82f6'; fontWeight = '600'; }
+                            levelText.innerHTML = `当前噪音：<span style="color:${color};font-weight:${fontWeight};font-size:1.2em">${db}</span>dB`;
                         }
                     }
 
-                    // 实时绘制图表
+                    // 绘制图表
                     drawNoiseChart();
-
-                    noiseAnimFrameId = requestAnimationFrame(noiseLoop);
                 }
 
-                // 启动动画循环
-                noiseAnimFrameId = requestAnimationFrame(noiseLoop);
+                // 使用 setInterval 实现 0.5帧/s 采样
+                noiseTimerId = setInterval(noiseLoop, NOISE_SAMPLE_INTERVAL);
+                noiseLoop(); // 立即执行一次
 
-                // 保存 animFrameId 以便清理
-                noiseMonitorInterval = noiseAnimFrameId;
+                // 保存 timerId 以便清理
+                noiseMonitorInterval = noiseTimerId;
             } catch (e) {
                 console.log('麦克风初始化失败:', e);
                 const levelText = document.getElementById('noiseLevelText');
@@ -3147,6 +3202,57 @@
         });
 
         // 更新历史弹窗
+
+
+        // ==================== 关机倒计时 ====================
+        let shutdownCountdownValue = 60;
+        let shutdownIntervalId = null;
+
+        function showShutdownCountdown() {
+            const overlay = document.getElementById('shutdownOverlay');
+            if (!overlay) return;
+            overlay.classList.remove('hidden');
+            overlay.style.display = 'flex';
+            shutdownCountdownValue = 60;
+            updateShutdownDisplay();
+
+            if (shutdownIntervalId) clearInterval(shutdownIntervalId);
+            shutdownIntervalId = setInterval(() => {
+                shutdownCountdownValue--;
+                updateShutdownDisplay();
+                if (shutdownCountdownValue <= 0) {
+                    clearInterval(shutdownIntervalId);
+                    // 通知 start_server.py 执行关机
+                    fetch('http://localhost:8080/shutdown', { method: 'POST' }).catch(() => {});
+                    // 显示"正在关机"文字
+                    const numEl = document.getElementById('shutdownCountdownNum');
+                    if (numEl) numEl.textContent = '关机';
+                    const subEl = overlay.querySelector('div[style*="秒后"]');
+                    if (subEl) subEl.textContent = '正在关闭电脑...';
+                    const btn = document.getElementById('shutdownCancelBtn');
+                    if (btn) btn.style.display = 'none';
+                }
+            }, 1000);
+        }
+
+        function updateShutdownDisplay() {
+            const numEl = document.getElementById('shutdownCountdownNum');
+            if (numEl) numEl.textContent = shutdownCountdownValue;
+            const fillEl = document.getElementById('shutdownProgressFill');
+            if (fillEl) {
+                const pct = (shutdownCountdownValue / 60) * 100;
+                fillEl.style.width = pct + '%';
+            }
+        }
+
+        function cancelShutdownCountdown() {
+            if (shutdownIntervalId) clearInterval(shutdownIntervalId);
+            const overlay = document.getElementById('shutdownOverlay');
+            if (overlay) {
+                overlay.classList.add('hidden');
+                overlay.style.display = 'none';
+            }
+        }
 
         // ==================== 版本检测 ====================
         const CURRENT_VERSION = 'v1.6.0';
