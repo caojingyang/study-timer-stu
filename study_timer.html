@@ -446,17 +446,6 @@
         </div>
     </div>
 
-    <!-- 关机倒计时覆盖层 -->
-    <div id="shutdownOverlay" class="hidden" style="position:fixed;inset:0;background:#000000;z-index:99999;display:none;flex-direction:column;align-items:center;justify-content:center;color:#ffffff;">
-        <div style="font-size:2.5rem;font-weight:bold;margin-bottom:1rem;">放学啦</div>
-        <div id="shutdownCountdownNum" style="font-size:8rem;font-weight:bold;line-height:1;">60</div>
-        <div style="font-size:1.5rem;margin-top:0.5rem;">秒后电脑将自动关机</div>
-        <div id="shutdownProgressBar" style="width:min(400px,80vw);height:6px;background:#333;border-radius:3px;margin-top:2rem;overflow:hidden;">
-            <div id="shutdownProgressFill" style="width:100%;height:100%;background:#6366f1;transition:width 1s linear;"></div>
-        </div>
-        <button id="shutdownCancelBtn" onclick="cancelShutdownCountdown()" style="margin-top:2rem;padding:12px 32px;border-radius:12px;border:1px solid #444;background:#1a1a1a;color:#ccc;cursor:pointer;font-size:1rem;transition:all 0.2s;" onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background='#1a1a1a'">取消关机</button>
-    </div>
-
     <!-- 修改当前项任务时长弹窗 -->
     <div id="modifyTaskModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         <div class="bg-white rounded-2xl p-8 w-96 shadow-2xl">
@@ -1307,9 +1296,6 @@
             if (examRealTimeInterval) { clearInterval(examRealTimeInterval); examRealTimeInterval = null; }
             if (examQuoteTimer) { clearInterval(examQuoteTimer); examQuoteTimer = null; }
             if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
-            if (shutdownIntervalId) { clearInterval(shutdownIntervalId); shutdownIntervalId = null; }
-            const shutdownOv = document.getElementById('shutdownOverlay');
-            if (shutdownOv) { shutdownOv.classList.add('hidden'); shutdownOv.style.display = 'none'; }
             // 清理噪音监测资源
             if (noiseMonitorInterval) { clearInterval(noiseMonitorInterval); noiseMonitorInterval = null; }
             if (microphone) { microphone.stop(); microphone = null; }
@@ -1759,9 +1745,6 @@
             usedQuoteIndices = [];
             if (quoteTimer) clearInterval(quoteTimer);
             if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
-            if (shutdownIntervalId) { clearInterval(shutdownIntervalId); shutdownIntervalId = null; }
-            const shutdownOv = document.getElementById('shutdownOverlay');
-            if (shutdownOv) { shutdownOv.classList.add('hidden'); shutdownOv.style.display = 'none'; }
 
             document.getElementById('editMode').classList.add('hidden');
             document.getElementById('timerMode').classList.remove('hidden');
@@ -2094,14 +2077,6 @@
                         showNoiseReport();
                     }, 10 * 1000);
                 }
-                // 放学后显示关机倒计时（与作业完成不同路径，但同样2分钟后触发）
-                if (!window._shutdownScheduled) {
-                    window._shutdownScheduled = true;
-                    if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
-                    nightFinishedTimer = setTimeout(() => {
-                        showShutdownCountdown();
-                    }, 2 * 60 * 1000);
-                }
                 return;
             }
 
@@ -2186,10 +2161,10 @@
             if (!currentHomework) {
                 if (lastHomeworkIndex !== -3) {
                     lastHomeworkIndex = -3;
-                    // 显示关机倒计时覆盖层（黑色背景 + 倒计时）
+                    // 1分钟后弹出提示
                     if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
                     nightFinishedTimer = setTimeout(() => {
-                        showShutdownCountdown();
+                        alert("请及时关闭电脑！");
                     }, 60 * 1000);
                 }
                 subjectEl.textContent = 'Finished！All of you are perfect！';
@@ -3203,56 +3178,6 @@
 
         // 更新历史弹窗
 
-
-        // ==================== 关机倒计时 ====================
-        let shutdownCountdownValue = 60;
-        let shutdownIntervalId = null;
-
-        function showShutdownCountdown() {
-            const overlay = document.getElementById('shutdownOverlay');
-            if (!overlay) return;
-            overlay.classList.remove('hidden');
-            overlay.style.display = 'flex';
-            shutdownCountdownValue = 60;
-            updateShutdownDisplay();
-
-            if (shutdownIntervalId) clearInterval(shutdownIntervalId);
-            shutdownIntervalId = setInterval(() => {
-                shutdownCountdownValue--;
-                updateShutdownDisplay();
-                if (shutdownCountdownValue <= 0) {
-                    clearInterval(shutdownIntervalId);
-                    // 通知 start_server.py 执行关机
-                    fetch('http://localhost:8080/shutdown', { method: 'POST' }).catch(() => {});
-                    // 显示"正在关机"文字
-                    const numEl = document.getElementById('shutdownCountdownNum');
-                    if (numEl) numEl.textContent = '关机';
-                    const subEl = overlay.querySelector('div[style*="秒后"]');
-                    if (subEl) subEl.textContent = '正在关闭电脑...';
-                    const btn = document.getElementById('shutdownCancelBtn');
-                    if (btn) btn.style.display = 'none';
-                }
-            }, 1000);
-        }
-
-        function updateShutdownDisplay() {
-            const numEl = document.getElementById('shutdownCountdownNum');
-            if (numEl) numEl.textContent = shutdownCountdownValue;
-            const fillEl = document.getElementById('shutdownProgressFill');
-            if (fillEl) {
-                const pct = (shutdownCountdownValue / 60) * 100;
-                fillEl.style.width = pct + '%';
-            }
-        }
-
-        function cancelShutdownCountdown() {
-            if (shutdownIntervalId) clearInterval(shutdownIntervalId);
-            const overlay = document.getElementById('shutdownOverlay');
-            if (overlay) {
-                overlay.classList.add('hidden');
-                overlay.style.display = 'none';
-            }
-        }
 
         // ==================== 版本检测 ====================
         const CURRENT_VERSION = 'v1.6.0';
