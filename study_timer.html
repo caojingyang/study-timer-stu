@@ -2161,11 +2161,6 @@
             if (!currentHomework) {
                 if (lastHomeworkIndex !== -3) {
                     lastHomeworkIndex = -3;
-                    // 1分钟后弹出提示
-                    if (nightFinishedTimer) clearTimeout(nightFinishedTimer);
-                    nightFinishedTimer = setTimeout(() => {
-                        alert("请及时关闭电脑！");
-                    }, 60 * 1000);
                 }
                 subjectEl.textContent = 'Finished！All of you are perfect！';
                 rangeEl.textContent = '';
@@ -2279,6 +2274,11 @@
                 let noiseBuffer = new Float32Array(analyser.fftSize);
                 let noiseTimerId = null;
 
+                // 自适应校准：前30秒收集RMS值，将最小值映射到~35dB
+                let calibrationOffset = 94; // 默认偏移量，校准后更新
+                let calibrationSamples = [];
+                let isCalibrated = false;
+
                 function noiseLoop() {
                     // 获取噪音值
                     if (!analyser) return;
@@ -2289,12 +2289,25 @@
                     }
                     const rms = Math.sqrt(sum / noiseBuffer.length);
                     const dbFS = 20 * Math.log10(Math.max(rms, 1e-10));
-                    const db = Math.max(0, Math.min(120, Math.round(dbFS + 94)));
 
                     const elapsed = (Date.now() - noiseStartTime) / 1000;
 
-                    // 跳过前 30 秒的初始化阶段
+                    // 前 30 秒：收集校准数据
                     if (elapsed < 30) {
+                        calibrationSamples.push(rms);
+                        // 每5秒尝试更新校准偏移量
+                        if (calibrationSamples.length >= 5) {
+                            // 取所有样本中最低的20%作为安静基线
+                            const sorted = [...calibrationSamples].sort((a, b) => a - b);
+                            const quietCount = Math.max(1, Math.floor(sorted.length * 0.2));
+                            let quietSum = 0;
+                            for (let i = 0; i < quietCount; i++) quietSum += sorted[i];
+                            const quietRms = quietSum / quietCount;
+                            // 假设安静基线对应 35dB SPL
+                            const quietDbFS = 20 * Math.log10(Math.max(quietRms, 1e-10));
+                            calibrationOffset = 35 - quietDbFS;
+                            calibrationOffset = Math.max(70, Math.min(120, calibrationOffset));
+                        }
                         const levelText = document.getElementById('noiseLevelText');
                         if (levelText) {
                             levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">校准中…</span>dB`;
@@ -2302,6 +2315,24 @@
                         drawNoiseChart();
                         return;
                     }
+
+                    // 校准完成
+                    if (!isCalibrated) {
+                        isCalibrated = true;
+                        // 最终校准：用全部样本重新计算
+                        const sorted = [...calibrationSamples].sort((a, b) => a - b);
+                        const quietCount = Math.max(1, Math.floor(sorted.length * 0.2));
+                        let quietSum = 0;
+                        for (let i = 0; i < quietCount; i++) quietSum += sorted[i];
+                        const quietRms = quietSum / quietCount;
+                        const quietDbFS = 20 * Math.log10(Math.max(quietRms, 1e-10));
+                        calibrationOffset = 35 - quietDbFS;
+                        calibrationOffset = Math.max(70, Math.min(120, calibrationOffset));
+                        // 释放校准样本内存
+                        calibrationSamples = null;
+                    }
+
+                    const db = Math.max(0, Math.min(120, Math.round(dbFS + calibrationOffset)));
 
                     // 晚自习开始前只显示不记录
                     const startTotal = startTime.hour * 60 + startTime.minute;
@@ -2414,70 +2445,16 @@
             }
         }
 
-        // 获取当前噪音分贝值（使用时域数据 + 校准偏移量）
-        function getNoiseLevel() {
-            if (!analyser) return 0;
-            // 使用时域 Float32 数据（-1 ~ 1），比频域数据更准确
-            const buffer = new Float32Array(analyser.fftSize);
-            analyser.getFloatTimeDomainData(buffer);
-            // 计算 RMS（均方根）
-            let sum = 0;
-            for (let i = 0; i < buffer.length; i++) {
-                sum += buffer[i] * buffer[i];
-            }
-            const rms = Math.sqrt(sum / buffer.length);
-            // 转换为 dBFS，再加校准偏移量映射为近似 dB SPL
-            // 偏移量 94 是标准声学参考值（94 dB SPL = 1 Pa）
-            const dbFS = 20 * Math.log10(Math.max(rms, 1e-10));
-            const dbSPL = Math.round(dbFS + 94);
-            return Math.max(0, Math.min(120, dbSPL));
-        }
-
-        // 更新噪音级别并记录数据
-        function updateNoiseLevel() {
-            const db = getNoiseLevel();
-            const elapsed = (Date.now() - noiseStartTime) / 1000; // 秒
-
-            // 跳过前 30 秒的初始化阶段（麦克风/环境不稳定）
-            if (elapsed < 30) {
-                // 仅更新显示，不记录数据
-                const levelText = document.getElementById('noiseLevelText');
-                if (levelText) {
-                    levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">校准中…</span>dB`;
-                }
-                drawNoiseChart();
-                return;
-            }
-
-            // 跳过下课期间（20:20 ~ 20:30）
-            const now = new Date();
-            const currentTotal = now.getHours() * 60 + now.getMinutes();
-            const breakStart = 20 * 60 + 20;
-            const breakEnd = 20 * 60 + 30;
-            if (currentTotal >= breakStart && currentTotal < breakEnd) {
-                const levelText = document.getElementById('noiseLevelText');
-                if (levelText) {
-                    levelText.innerHTML = `当前噪音：<span style="color:#94a3b8">课间休息</span>`;
-                }
-                drawNoiseChart();
-                return;
-            }
-
-            noiseData.push({ time: elapsed, db: db });
-
-            // 更新文字显示
-            const levelText = document.getElementById('noiseLevelText');
-            if (levelText) {
-                let color = '#10b981'; // 翠绿 <=30（安静）
-                let fontWeight = '600';
-                if (db > 50) { color = '#8b5cf6'; fontWeight = '800'; } // 紫色 >50（很吵）
-                else if (db > 40) { color = '#f59e0b'; fontWeight = '700'; } // 橙色 41-50（偏吵）
-                else if (db > 30) { color = '#3b82f6'; fontWeight = '600'; } // 蓝色 31-40（正常）
-                levelText.innerHTML = `当前噪音：<span style="color:${color};font-weight:${fontWeight};font-size:1.2em">${db}</span>dB`;
-            }
-
-            // 绘制图表
-            drawNoiseChart();
+        // 获取噪音等效描述
+        function getNoiseEquivalent(db) {
+            if (db <= 30) return { text: '相当于安静图书馆', color: '#10b981' };
+            if (db <= 35) return { text: '相当于安静教室', color: '#22c55e' };
+            if (db <= 40) return { text: '相当于轻声交谈', color: '#3b82f6' };
+            if (db <= 45) return { text: '相当于正常交谈', color: '#f59e0b' };
+            if (db <= 50) return { text: '相当于较吵教室', color: '#f97316' };
+            if (db <= 55) return { text: '相当于嘈杂办公室', color: '#8b5cf6' };
+            if (db <= 60) return { text: '相当于大声说话', color: '#ef4444' };
+            return { text: '相当于喧闹街道', color: '#dc2626' };
         }
 
         // 绘制噪音走势图
@@ -2590,24 +2567,24 @@
                 // 绘制最后一个点
                 const lastI = noiseData.length - 1;
                 const lastX = padding.left + chartW;
-                const lastY = padding.top + chartH - ((Math.min(noiseData[lastI].db, 35) - displayMin) / displayRange) * chartH;
+                const lastY = padding.top + chartH - ((Math.min(noiseData[lastI].db, displayMax) - displayMin) / displayRange) * chartH;
                 const lastDb = noiseData[lastI].db;
-                let lastColor = '#22c55e';
-                if (lastDb > 35) lastColor = '#ef4444';
-                else if (lastDb > 20) lastColor = '#eab308';
+                let lastColor = '#10b981';
+                if (lastDb > 50) lastColor = '#8b5cf6';
+                else if (lastDb > 40) lastColor = '#f59e0b';
+                else if (lastDb > 30) lastColor = '#3b82f6';
                 ctx.beginPath();
                 ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
                 ctx.fillStyle = lastColor;
                 ctx.fill();
             }
 
-            // 绘制Y轴标签
+            // 绘制Y轴标签（动态）
             ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
             ctx.font = '9px sans-serif';
             ctx.textAlign = 'left';
-            ctx.fillText('35dB', padding.left, padding.top + 8);
-            ctx.fillText('20dB', padding.left, padding.top + chartH * (1 - 20/35) + 4);
-            ctx.fillText('0dB', padding.left, h - padding.bottom);
+            ctx.fillText(Math.round(displayMax) + 'dB', padding.left, padding.top + 8);
+            ctx.fillText(Math.round(displayMin) + 'dB', padding.left, h - padding.bottom);
 
             // 绘制X轴时间标签
             if (noiseData.length >= 2) {
@@ -2638,7 +2615,8 @@
             // 显示统计信息
             const statsEl = document.getElementById('noiseReportStats');
             if (statsEl) {
-                statsEl.innerHTML = `最大噪音：<span class="stat-max">${maxDb}</span>dB&emsp;&emsp;最小噪音：<span class="stat-min">${minDb}</span>dB&emsp;&emsp;平均噪音：${avgDb}dB`;
+                const equiv = getNoiseEquivalent(avgDb);
+                statsEl.innerHTML = `最大噪音：<span class="stat-max">${maxDb}</span>dB&emsp;&emsp;最小噪音：<span class="stat-min">${minDb}</span>dB&emsp;&emsp;平均噪音：<span style="color:${equiv.color};font-weight:700">${avgDb}</span>dB <span style="color:${equiv.color};font-size:0.9em">${equiv.text}</span>`;
             }
 
             // 先显示覆盖层，再获取尺寸
@@ -2662,23 +2640,23 @@
                     // 清空
                     rCtx.clearRect(0, 0, w, h);
 
-                    // 固定纵轴：0dB ~ 35dB
+                    // 动态纵轴：0dB ~ max(50, maxDb+5)
                     const displayMin = 0;
-                    const displayMax = 35;
+                    const displayMax = Math.max(50, maxDb + 5);
                     const displayRange = displayMax - displayMin || 1;
 
                     const padding = { top: 20, bottom: 30, left: 50, right: 20 };
                     const chartW = w - padding.left - padding.right;
                     const chartH = h - padding.top - padding.bottom;
 
-                    // 绘制网格（固定3条刻度线：0dB、20dB、35dB）
+                    // 绘制网格（动态刻度线）
                     rCtx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
                     rCtx.lineWidth = 0.5;
-                    const yTicks = [
-                        { db: 0, label: '0dB' },
-                        { db: 20, label: '20dB' },
-                        { db: 35, label: '35dB' }
-                    ];
+                    const tickStep = displayMax <= 50 ? 10 : 20;
+                    const yTicks = [];
+                    for (let t = 0; t <= displayMax; t += tickStep) {
+                        yTicks.push({ db: t, label: t + 'dB' });
+                    }
                     rCtx.fillStyle = 'rgba(255, 255, 255, 0.5)';
                     rCtx.font = '12px sans-serif';
                     rCtx.textAlign = 'right';
@@ -2709,11 +2687,12 @@
 
                     // 绘制分段着色曲线
                     if (noiseData.length >= 2) {
-                        // 渐变填充（绿色为主）
+                        // 渐变填充
                         const gradient = rCtx.createLinearGradient(0, padding.top, 0, padding.top + chartH);
-                        gradient.addColorStop(0, 'rgba(234, 179, 8, 0.3)');
-                        gradient.addColorStop(0.57, 'rgba(34, 197, 94, 0.3)');
-                        gradient.addColorStop(1, 'rgba(34, 197, 94, 0.02)');
+                        gradient.addColorStop(0, 'rgba(139, 92, 246, 0.3)');
+                        gradient.addColorStop(0.4, 'rgba(245, 158, 11, 0.25)');
+                        gradient.addColorStop(0.7, 'rgba(59, 130, 246, 0.25)');
+                        gradient.addColorStop(1, 'rgba(16, 185, 129, 0.02)');
 
                         // 填充路径
                         rCtx.beginPath();
@@ -2741,16 +2720,17 @@
                             const x2 = padding.left + (i / (noiseData.length - 1)) * chartW;
                             const y2_raw = noiseData[i].db;
 
-                            // 截断到35dB
-                            const y1 = padding.top + chartH - ((Math.min(y1_raw, 35) - displayMin) / displayRange) * chartH;
-                            const y2 = padding.top + chartH - ((Math.min(y2_raw, 35) - displayMin) / displayRange) * chartH;
+                            // 截断到displayMax
+                            const y1 = padding.top + chartH - ((Math.min(y1_raw, displayMax) - displayMin) / displayRange) * chartH;
+                            const y2 = padding.top + chartH - ((Math.min(y2_raw, displayMax) - displayMin) / displayRange) * chartH;
 
                             // 根据分贝选择颜色
                             const avgDb = (y1_raw + y2_raw) / 2;
                             let color;
-                            if (avgDb <= 20) color = '#22c55e';
-                            else if (avgDb <= 35) color = '#eab308';
-                            else color = '#ef4444';
+                            if (avgDb <= 30) color = '#10b981';
+                            else if (avgDb <= 40) color = '#3b82f6';
+                            else if (avgDb <= 50) color = '#f59e0b';
+                            else color = '#8b5cf6';
 
                             rCtx.beginPath();
                             rCtx.moveTo(x1, y1);
@@ -2769,7 +2749,7 @@
 
                         // 最大值点
                         const maxX = padding.left + (maxIdx / (noiseData.length - 1)) * chartW;
-                        const maxY = padding.top + chartH - ((Math.min(noiseData[maxIdx].db, 35) - displayMin) / displayRange) * chartH;
+                        const maxY = padding.top + chartH - ((Math.min(noiseData[maxIdx].db, displayMax) - displayMin) / displayRange) * chartH;
                         rCtx.beginPath();
                         rCtx.arc(maxX, maxY, 5, 0, Math.PI * 2);
                         rCtx.fillStyle = '#ef4444';
@@ -2781,7 +2761,7 @@
 
                         // 最小值点
                         const minX = padding.left + (minIdx / (noiseData.length - 1)) * chartW;
-                        const minY = padding.top + chartH - ((Math.min(noiseData[minIdx].db, 35) - displayMin) / displayRange) * chartH;
+                        const minY = padding.top + chartH - ((Math.min(noiseData[minIdx].db, displayMax) - displayMin) / displayRange) * chartH;
                         rCtx.beginPath();
                         rCtx.arc(minX, minY, 5, 0, Math.PI * 2);
                         rCtx.fillStyle = '#22c55e';
