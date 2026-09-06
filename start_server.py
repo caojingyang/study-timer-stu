@@ -42,7 +42,7 @@ APP_VERSION = "v2.9.1"
 SCHOOL_END_HOUR = 21       # 放学时间：21:45
 SCHOOL_END_MINUTE = 45
 SHUTDOWN_DELAY_MIN = 1     # 放学后1分钟触发
-SHUTDOWN_COUNTDOWN = 60    # 关机倒计时（秒）
+SHUTDOWN_COUNTDOWN = 15    # 关机倒计时（秒）
 
 # ============================================================
 # 路径工具
@@ -443,8 +443,9 @@ def show_shutdown_countdown():
         traceback.print_exc()
 
 def show_shutdown_countdown_impl():
-    """关机倒计时窗口实现（tkinter）— 简洁黑色背景 + 倒计时"""
+    """关机倒计时窗口实现（tkinter）— 纯黑背景 + 脉动动画 + 倒计时"""
     import tkinter as tk
+    import math
 
     # 获取屏幕尺寸（全屏覆盖）
     screen_w = None
@@ -514,6 +515,35 @@ def show_shutdown_countdown_impl():
     # ===== 状态变量 =====
     remaining = [SHUTDOWN_COUNTDOWN]
     shutdown_cancelled = [False]
+    pulse_phase = [0.0]  # 脉动相位
+
+    # ===== 脉动动画（每50ms更新） =====
+    def pulse_animation():
+        if shutdown_cancelled[0]:
+            return
+        pulse_phase[0] += 0.08
+        # 正弦波脉动：0~1之间
+        pulse = (math.sin(pulse_phase[0]) + 1) / 2
+
+        # "放学啦" 文字脉动：字号 44~56，颜色亮度变化
+        banner_size = int(44 + 12 * pulse)
+        # 颜色从 #666666 到 #ffffff
+        gray_val = int(0x66 + (0xff - 0x66) * pulse)
+        banner_color = f'#{gray_val:02x}{gray_val:02x}{gray_val:02x}'
+        canvas.itemconfig(banner_text, font=('Microsoft YaHei', banner_size, 'bold'), fill=banner_color)
+
+        # 倒计时数字脉动：字号 110~130
+        num_size = int(110 + 20 * pulse)
+        canvas.itemconfig(countdown_num, font=('Microsoft YaHei', num_size, 'bold'))
+
+        # 进度条发光：颜色亮度变化
+        r_val = int(0x63 + (0xff - 0x63) * pulse * 0.3)
+        g_val = int(0x66 + (0xff - 0x66) * pulse * 0.3)
+        b_val = int(0xf1 + (0xff - 0xf1) * pulse * 0.3)
+        bar_color = f'#{r_val:02x}{g_val:02x}{b_val:02x}'
+        canvas.itemconfig(bar_fill, fill=bar_color)
+
+        root.after(50, pulse_animation)
 
     # ===== 倒计时更新（每秒） =====
     def update_countdown():
@@ -571,7 +601,8 @@ def show_shutdown_countdown_impl():
     canvas.tag_bind(btn_text, '<Enter>', on_enter)
     canvas.tag_bind(btn_text, '<Leave>', on_leave)
 
-    # 启动倒计时
+    # 启动脉动动画和倒计时
+    pulse_animation()
     update_countdown()
     root.mainloop()
 
@@ -1833,6 +1864,16 @@ def create_tray_icon_impl():
     )
 
     icon = pystray.Icon(APP_NAME, image, f"{APP_NAME} {APP_VERSION}", menu)
+
+    # 托盘图标左键单击也弹出菜单（仍支持右键菜单）
+    try:
+        def _on_left_click(self, button=None, time=None):
+            self.show_menu()
+            return True
+        icon._on_left_click = _on_left_click
+    except Exception as e:
+        print(f"[托盘] 左键菜单设置失败: {e}")
+
     return icon
 
 # ============================================================
