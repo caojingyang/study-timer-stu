@@ -50,7 +50,7 @@ body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:#0f172a;colo
 </div>
 <div class="file-list" id="fileList"></div>
 <div class="footer" id="footer">
-<div class="global-status" id="globalStatus">正在准备更新...</div>
+<div class="global-status" id="globalStatus"><span class="spinner"></span>正在连接更新服务...</div>
 </div>
 <script>
 var files=[
@@ -61,6 +61,9 @@ var files=[
 ];
 var allDone=false;
 var autoCloseTimer=null;
+var status={};
+var pollFailCount=0;
+var started=false;
 
 function render(){
 var html='';
@@ -90,10 +93,13 @@ startCountdown();
 }else{
 var anyFailed=files.some(function(f){var s=status[f.name];return s&&s.state==='failed';});
 var anyDownloading=files.some(function(f){var s=status[f.name];return s&&s.state==='downloading';});
+var anyPending=files.some(function(f){var s=status[f.name];return !s||s.state==='pending';});
 if(anyFailed){
 footer.innerHTML='<div class="error-msg">⚠ 部分文件更新失败，请点击对应文件后的"重试"按钮</div>';
 }else if(anyDownloading){
 footer.innerHTML='<div class="global-status">正在更新中，请稍候...</div>';
+}else if(!started && anyPending){
+footer.innerHTML='<div class="global-status"><span class="spinner"></span>正在连接更新服务...</div>';
 }else{
 footer.innerHTML='<div class="global-status">正在准备更新...</div>';
 }
@@ -116,11 +122,7 @@ callBuild();
 
 function callBuild(){
 fetch('/api/build',{method:'POST'}).then(function(r){return r.text();}).then(function(){
-if(window.pywebview&&window.pywebview.api){
 window.close();
-}else{
-window.close();
-}
 }).catch(function(){window.close();});
 }
 
@@ -130,25 +132,46 @@ if(!d.ok){console.error('retry failed');}
 }).catch(function(e){console.error(e);});
 }
 
-var status={};
 function poll(){
 fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+pollFailCount=0;
 status=d.files||{};
 allDone=d.allDone||false;
 render();
 if(!allDone){
-setTimeout(poll,200);
+setTimeout(poll,300);
 }
 }).catch(function(e){
-setTimeout(poll,500);
+pollFailCount++;
+if(pollFailCount>10){
+var footer=document.getElementById('footer');
+footer.innerHTML='<div class="error-msg">⚠ 连接更新服务失败，请关闭后重试</div>';
+}else{
+setTimeout(poll,800);
+}
 });
 }
 
+function tryStart(retries){
 fetch('/api/start',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+started=true;
+render();
 poll();
 }).catch(function(e){
-document.getElementById('footer').innerHTML='<div class="error-msg">无法启动更新，请检查网络</div>';
+if(retries>0){
+setTimeout(function(){tryStart(retries-1);},500);
+}else{
+started=false;
+render();
+document.getElementById('footer').innerHTML='<div class="error-msg">⚠ 无法连接更新服务，请关闭后重试</div>';
+}
 });
+}
+
+// 立即渲染初始状态
+render();
+// 尝试启动更新（最多重试5次）
+tryStart(5);
 </script>
 </body>
 </html>
