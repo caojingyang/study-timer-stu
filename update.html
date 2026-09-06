@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>系统更新</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei','Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.header{background:linear-gradient(135deg,#1e293b,#0f172a);padding:20px 30px;border-bottom:1px solid #334155;text-align:center}
+.header h1{font-size:22px;font-weight:700;color:#818cf8;letter-spacing:2px}
+.header .sub{font-size:13px;color:#64748b;margin-top:4px}
+.file-list{flex:1;overflow-y:auto;padding:16px 20px}
+.file-card{background:#1e293b;border-radius:10px;padding:14px 18px;margin-bottom:12px;display:flex;align-items:center;gap:14px;transition:border-color .3s;border:1px solid transparent}
+.file-card.downloading{border-color:#3b82f6}
+.file-card.done{border-color:#10b981}
+.file-card.failed{border-color:#ef4444}
+.file-icon{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;background:#334155;transition:all .3s}
+.file-card.downloading .file-icon{background:#1e3a5f}
+.file-card.done .file-icon{background:#065f46}
+.file-card.failed .file-icon{background:#7f1d1d}
+.file-info{flex:1;min-width:0}
+.file-name{font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:4px;word-break:break-all}
+.file-status{font-size:12px;color:#64748b}
+.file-card.downloading .file-status{color:#60a5fa}
+.file-card.done .file-status{color:#34d399}
+.file-card.failed .file-status{color:#f87171}
+.progress-bar{height:4px;background:#334155;border-radius:2px;margin-top:6px;overflow:hidden}
+.progress-fill{height:100%;background:#3b82f6;transition:width .3s ease;border-radius:2px}
+.file-card.done .progress-fill{background:#10b981;width:100%}
+.file-card.failed .progress-fill{background:#ef4444;width:100%}
+.retry-btn{flex-shrink:0;padding:6px 14px;border-radius:6px;font-size:12px;font-weight:600;border:1px solid #475569;background:#1e293b;color:#94a3b8;cursor:pointer;transition:all .2s;white-space:nowrap}
+.retry-btn:hover{background:#334155;color:#e2e8f0;border-color:#64748b}
+.retry-btn:active{transform:scale(.96)}
+.retry-btn.hidden{display:none}
+.footer{padding:16px 20px;border-top:1px solid #334155;text-align:center}
+.global-status{font-size:14px;font-weight:600;color:#818cf8}
+.success-msg{font-size:16px;font-weight:700;color:#10b981;animation:pulse 1s ease infinite}
+.error-msg{font-size:14px;font-weight:600;color:#f87171}
+.countdown{color:#fbbf24;font-weight:800}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid #3b82f6;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>系统在线更新</h1>
+<div class="sub">从云端下载最新文件并自动编译</div>
+</div>
+<div class="file-list" id="fileList"></div>
+<div class="footer" id="footer">
+<div class="global-status" id="globalStatus">正在准备更新...</div>
+</div>
+<script>
+var files=[
+{name:'study_timer.html',label:'计时系统页面'},
+{name:'seat_choose.html',label:'选座系统页面'},
+{name:'update.py',label:'更新程序'},
+{name:'start_server.py',label:'服务端程序'}
+];
+var allDone=false;
+var autoCloseTimer=null;
+
+function render(){
+var html='';
+files.forEach(function(f){
+var s=status[f.name]||{state:'pending',progress:0,source:'',error:''};
+var cls='',icon='⏳',statText='等待中',progStyle='width:0%';
+if(s.state==='downloading'){cls='downloading';icon='<span class="spinner"></span>';statText='正在从 '+s.source+' 下载... '+s.progress+'%';progStyle='width:'+s.progress+'%';}
+else if(s.state==='done'){cls='done';icon='✓';statText='更新成功'+(s.source?' ('+s.source+')':'');progStyle='width:100%';}
+else if(s.state==='failed'){cls='failed';icon='✗';statText=s.error||'更新失败';progStyle='width:100%';}
+var showRetry=s.state==='failed'?'':'hidden';
+html+='<div class="file-card '+cls+'">'+
+'<div class="file-icon">'+icon+'</div>'+
+'<div class="file-info">'+
+'<div class="file-name">'+f.label+' <span style="color:#64748b;font-size:12px;font-weight:400">'+f.name+'</span></div>'+
+'<div class="file-status">'+statText+'</div>'+
+'<div class="progress-bar"><div class="progress-fill" style="'+progStyle+'"></div></div>'+
+'</div>'+
+'<button class="retry-btn '+showRetry+'" onclick="retryFile(\''+f.name+'\')">重试</button>'+
+'</div>';
+});
+document.getElementById('fileList').innerHTML=html;
+
+var footer=document.getElementById('footer');
+if(allDone){
+footer.innerHTML='<div class="success-msg">✅ 全部更新成功！<span class="countdown" id="cd">3</span> 秒后自动编译...</div>';
+startCountdown();
+}else{
+var anyFailed=files.some(function(f){var s=status[f.name];return s&&s.state==='failed';});
+var anyDownloading=files.some(function(f){var s=status[f.name];return s&&s.state==='downloading';});
+if(anyFailed){
+footer.innerHTML='<div class="error-msg">⚠ 部分文件更新失败，请点击对应文件后的"重试"按钮</div>';
+}else if(anyDownloading){
+footer.innerHTML='<div class="global-status">正在更新中，请稍候...</div>';
+}else{
+footer.innerHTML='<div class="global-status">正在准备更新...</div>';
+}
+}
+}
+
+function startCountdown(){
+var cd=3;
+var el=document.getElementById('cd');
+if(autoCloseTimer)clearInterval(autoCloseTimer);
+autoCloseTimer=setInterval(function(){
+cd--;
+if(el)el.textContent=cd;
+if(cd<=0){
+clearInterval(autoCloseTimer);
+callBuild();
+}
+},1000);
+}
+
+function callBuild(){
+fetch('/api/build',{method:'POST'}).then(function(r){return r.text();}).then(function(){
+if(window.pywebview&&window.pywebview.api){
+window.close();
+}else{
+window.close();
+}
+}).catch(function(){window.close();});
+}
+
+function retryFile(name){
+fetch('/api/retry?file='+encodeURIComponent(name),{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+if(!d.ok){console.error('retry failed');}
+}).catch(function(e){console.error(e);});
+}
+
+var status={};
+function poll(){
+fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+status=d.files||{};
+allDone=d.allDone||false;
+render();
+if(!allDone){
+setTimeout(poll,200);
+}
+}).catch(function(e){
+setTimeout(poll,500);
+});
+}
+
+fetch('/api/start',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
+poll();
+}).catch(function(e){
+document.getElementById('footer').innerHTML='<div class="error-msg">无法启动更新，请检查网络</div>';
+});
+</script>
+</body>
+</html>
