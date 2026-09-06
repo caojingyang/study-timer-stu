@@ -333,12 +333,23 @@ def run_build_bat():
     os._exit(0)
 
 def start_http_server():
-    """启动 HTTP 服务器，返回端口号"""
+    """启动 HTTP 服务器，返回端口号（确保服务器就绪后返回）"""
     # 让操作系统自动分配可用端口
     server = http.server.HTTPServer(('127.0.0.1', 0), UpdateHandler)
     port = server.server_address[1]
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
+    # 等待服务器就绪：通过多次尝试连接验证
+    for _ in range(20):
+        try:
+            import urllib.request
+            req = urllib.request.Request(f'http://127.0.0.1:{port}/api/status')
+            with urllib.request.urlopen(req, timeout=0.5) as resp:
+                if resp.status == 200:
+                    break
+        except:
+            pass
+        time.sleep(0.1)
     return port
 
 # ============ pywebview 启动 ============
