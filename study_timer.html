@@ -727,6 +727,7 @@
         let startTime = { hour: 18, minute: 50 };
         let timerInterval = null;
         let lastHomeworkIndex = -1;
+        let lastHomeworkEndTimestamp = 0;  // 上一个作业结束的时间戳，用于作业切换后1分钟内噪音只显示不记录
         let alertSound = null;
         let quoteTimer = null;
         let currentQuoteIndex = 0;
@@ -2142,6 +2143,8 @@
                 if (lastHomeworkIndex >= 0) {
                     const prevHomework = homeworkList[lastHomeworkIndex];
                     if (prevHomework) {
+                        // 记录作业结束时间，用于1分钟内噪音只显示不记录
+                        lastHomeworkEndTimestamp = Date.now();
                         // 英语订正和含"自习"的作业静音，其余50%音量
                         if (prevHomework.subject !== '英语订正' && !prevHomework.subject.includes('自习')) {
                             alertSound.volume = 0.5;
@@ -2366,13 +2369,17 @@
                         return;
                     }
 
-                    // 问题4：特定时间段只显示噪音值，不进行记录
+                    // 特定时间段只显示噪音值，不进行记录
                     // 晚自习开始前、19:00~19:01、19:30~19:31、19:40~19:41、20:30~20:31
+                    // 作业结束后1分钟内（学生整理物品的过渡期）
+                    const isHomeworkTransition = lastHomeworkEndTimestamp > 0 && 
+                        Date.now() - lastHomeworkEndTimestamp < 60 * 1000;
                     const isExcludedTime = (currentTotal < startTotal) ||
                         (currentTotal >= 19 * 60 && currentTotal < 19 * 60 + 1) ||
                         (currentTotal >= 19 * 60 + 30 && currentTotal < 19 * 60 + 31) ||
                         (currentTotal >= 19 * 60 + 40 && currentTotal < 19 * 60 + 41) ||
-                        (currentTotal >= 20 * 60 + 30 && currentTotal < 20 * 60 + 31);
+                        (currentTotal >= 20 * 60 + 30 && currentTotal < 20 * 60 + 31) ||
+                        isHomeworkTransition;
 
                     // 每2秒记录一次数据点（0.5帧/s）
                     const now_ms = Date.now();
