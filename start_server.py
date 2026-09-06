@@ -1094,6 +1094,8 @@ def _show_received_files_window_worker():
                     )
                     _webview_started = True
                     webview.start(debug=False)
+                    # 所有窗口关闭后，重置标志以便下次重新启动事件循环
+                    _webview_started = False
                 else:
                     webview.create_window(
                         '接收文件列表',
