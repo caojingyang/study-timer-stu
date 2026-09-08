@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>高二（13）班专属计时系统</title>
     <link href="tailwind.min.css?v=2" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css'">
     <style>
         /* ===== 触摸/点击响应速度优化（适配教室大屏） ===== */
 
@@ -1234,21 +1234,9 @@
             updateTableRows();
             alertSound = document.getElementById('alertSound');
 
-            // 从数据库加载当日时间表，并自动清除非当天的时间表
+            // 清除非当天的旧时间表（不自动加载，进入晚自习模式时由用户确认后加载）
             var todayDate = new Date().toISOString().split('T')[0];
             DB.deleteOldSchedules(todayDate);
-            DB.getSchedule(todayDate).then(function(data) {
-                if (data) {
-                    homeworkList = (typeof data.homework_list === 'string' ? JSON.parse(data.homework_list) : data.homework_list).map(function(item, idx) {
-                        return { id: idx, subject: item.subject, time: item.time };
-                    });
-                    var parts = data.start_time.split(':');
-                    startTime = { hour: parseInt(parts[0]), minute: parseInt(parts[1]) };
-                    // 同步 currentRowId，避免后续新增行 id 冲突
-                    currentRowId = homeworkList.length;
-                    updateTableRows();
-                }
-            }).catch(function(e) { /* 静默 */ });
         });
 
         // ==================== 页面切换 ====================
@@ -1615,14 +1603,14 @@
                     </td>
                     <td class="py-4 px-4">${estTimeHtml}</td>
                     <td class="py-4 px-4">
-                        <div class="flex items-center gap-2">
-                            <button onclick="moveRowUp(${row.id})" class="text-gray-500 hover:text-blue-600 transition-all p-1 ${index === 0 ? 'opacity-30 cursor-not-allowed' : ''}" ${index === 0 ? 'disabled' : ''} title="上移">
+                        <div class="flex items-center gap-1">
+                            <button onclick="moveRowUp(${row.id})" class="w-8 h-8 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-all ${index === 0 ? 'opacity-30 cursor-not-allowed' : ''}" ${index === 0 ? 'disabled' : ''} title="上移">
                                 <i class="fa fa-arrow-up"></i>
                             </button>
-                            <button onclick="moveRowDown(${row.id})" class="text-gray-500 hover:text-blue-600 transition-all p-1 ${index === homeworkList.length - 1 ? 'opacity-30 cursor-not-allowed' : ''}" ${index === homeworkList.length - 1 ? 'disabled' : ''} title="下移">
+                            <button onclick="moveRowDown(${row.id})" class="w-8 h-8 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-all ${index === homeworkList.length - 1 ? 'opacity-30 cursor-not-allowed' : ''}" ${index === homeworkList.length - 1 ? 'disabled' : ''} title="下移">
                                 <i class="fa fa-arrow-down"></i>
                             </button>
-                            <button onclick="deleteRow(${row.id})" class="text-red-500 hover:text-red-700 transition-all p-1" title="删除">
+                            <button onclick="deleteRow(${row.id})" class="w-8 h-8 flex items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-all" title="删除">
                                 <i class="fa fa-trash"></i>
                             </button>
                         </div>
