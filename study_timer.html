@@ -244,7 +244,7 @@
 
         <!-- 噪音监测仪 -->
         <div id="noiseMonitor" class="noise-monitor hidden">
-            <div id="noiseLevelText" class="noise-level-text">当前噪音：--dB</div>
+            <div id="noiseLevelText" class="noise-level-text cursor-pointer" onclick="openNoiseCalibrationModal()" title="点击校准噪音">当前噪音：--dB</div>
             <div id="noiseWarningText" class="noise-warning-text hidden">请保持安静！</div>
             <div class="noise-canvas-wrap">
                 <canvas id="noiseCanvas"></canvas>
@@ -338,6 +338,51 @@
             <div class="flex gap-3">
                 <button onclick="closeOtherSubjectModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg transition-all">取消</button>
                 <button onclick="confirmOtherSubject()" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2 rounded-lg transition-all">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 噪音校准弹窗 -->
+    <div id="noiseCalibrationModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 text-center">校准噪音</h3>
+
+            <!-- 密码验证步骤 -->
+            <div id="noiseCalibPasswordStep">
+                <p class="text-gray-600 text-sm mb-3 text-center">请输入管理员密码</p>
+                <input type="password" id="noiseCalibPassword" maxlength="8" placeholder="8位密码" 
+                    class="w-full border-2 border-gray-200 rounded-lg px-4 py-3 text-lg text-center font-mono focus:border-primary outline-none mb-4"
+                    onkeypress="if(event.key==='Enter')verifyNoiseCalibPassword()">
+                <p id="noiseCalibPwdError" class="text-red-500 text-sm text-center mb-3 hidden">密码错误</p>
+                <div class="flex gap-3">
+                    <button onclick="closeNoiseCalibrationModal()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg transition-all">取消</button>
+                    <button onclick="verifyNoiseCalibPassword()" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2 rounded-lg transition-all">确认</button>
+                </div>
+            </div>
+
+            <!-- 校准调整步骤 -->
+            <div id="noiseCalibAdjustStep" class="hidden">
+                <div class="text-center mb-4">
+                    <p class="text-gray-500 text-sm mb-2">当前显示值</p>
+                    <p id="noiseCalibCurrentDb" class="text-4xl font-bold text-gray-800">-- dB</p>
+                </div>
+                <div class="flex items-center justify-center gap-6 mb-4">
+                    <button onclick="adjustNoiseOffset(-5)" class="w-16 h-16 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white text-3xl rounded-full shadow-lg transition-all">
+                        <i class="fa fa-minus"></i>
+                    </button>
+                    <div class="text-center">
+                        <p class="text-gray-500 text-xs">偏移量</p>
+                        <p id="noiseCalibOffset" class="text-2xl font-bold text-primary">+0</p>
+                    </div>
+                    <button onclick="adjustNoiseOffset(5)" class="w-16 h-16 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white text-3xl rounded-full shadow-lg transition-all">
+                        <i class="fa fa-plus"></i>
+                    </button>
+                </div>
+                <p class="text-gray-400 text-xs text-center mb-4">每次调整 ±5dB</p>
+                <div class="flex gap-3">
+                    <button onclick="resetNoiseOffset()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg transition-all">重置</button>
+                    <button onclick="closeNoiseCalibrationModal()" class="flex-1 bg-primary hover:bg-primary/90 text-white py-2 rounded-lg transition-all">完成</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1562,7 +1607,7 @@
                     </td>
                     <td class="py-4 px-4">
                         ${row.time ?
-                            `<span class="text-gray-800 font-medium">${row.time}min</span>` :
+                            `<span class="text-gray-800 font-medium cursor-pointer hover:text-primary transition-colors" onclick="openTimeInputModal(${row.id})" title="点击重新设置时间">${row.time}min <i class="fa fa-pencil text-xs text-gray-400"></i></span>` :
                             `<button onclick="openTimeInputModal(${row.id})" class="bg-green-100 hover:bg-green-200 text-green-700 px-4 py-2 rounded-lg transition-all">
                                 <i class="fa fa-clock-o mr-2"></i>输入完成用时
                             </button>`
@@ -1570,9 +1615,17 @@
                     </td>
                     <td class="py-4 px-4">${estTimeHtml}</td>
                     <td class="py-4 px-4">
-                        <button onclick="deleteRow(${row.id})" class="text-red-500 hover:text-red-700 font-medium transition-all">
-                            <i class="fa fa-trash mr-1"></i>删除
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button onclick="moveRowUp(${row.id})" class="text-gray-500 hover:text-blue-600 transition-all p-1 ${index === 0 ? 'opacity-30 cursor-not-allowed' : ''}" ${index === 0 ? 'disabled' : ''} title="上移">
+                                <i class="fa fa-arrow-up"></i>
+                            </button>
+                            <button onclick="moveRowDown(${row.id})" class="text-gray-500 hover:text-blue-600 transition-all p-1 ${index === homeworkList.length - 1 ? 'opacity-30 cursor-not-allowed' : ''}" ${index === homeworkList.length - 1 ? 'disabled' : ''} title="下移">
+                                <i class="fa fa-arrow-down"></i>
+                            </button>
+                            <button onclick="deleteRow(${row.id})" class="text-red-500 hover:text-red-700 transition-all p-1" title="删除">
+                                <i class="fa fa-trash"></i>
+                            </button>
+                        </div>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -1585,6 +1638,24 @@
 
         function deleteRow(id) {
             homeworkList = homeworkList.filter(row => row.id !== id);
+            updateTableRows();
+        }
+
+        function moveRowUp(id) {
+            const idx = homeworkList.findIndex(r => r.id === id);
+            if (idx <= 0) return;
+            const temp = homeworkList[idx - 1];
+            homeworkList[idx - 1] = homeworkList[idx];
+            homeworkList[idx] = temp;
+            updateTableRows();
+        }
+
+        function moveRowDown(id) {
+            const idx = homeworkList.findIndex(r => r.id === id);
+            if (idx < 0 || idx >= homeworkList.length - 1) return;
+            const temp = homeworkList[idx + 1];
+            homeworkList[idx + 1] = homeworkList[idx];
+            homeworkList[idx] = temp;
             updateTableRows();
         }
 
@@ -1624,6 +1695,85 @@
                 if (row) { row.subject = input; updateTableRows(); }
             }
             closeOtherSubjectModal();
+        }
+
+        // ==================== 噪音校准 ====================
+        let noiseManualOffset = 0;  // 手动校准偏移量（从localStorage读取）
+        let noiseCalibUpdateTimer = null;
+
+        function openNoiseCalibrationModal() {
+            // 从localStorage读取保存的偏移量
+            const saved = localStorage.getItem('noise_manual_offset');
+            if (saved !== null) {
+                noiseManualOffset = parseInt(saved) || 0;
+            }
+            // 重置到密码步骤
+            document.getElementById('noiseCalibPasswordStep').classList.remove('hidden');
+            document.getElementById('noiseCalibAdjustStep').classList.add('hidden');
+            document.getElementById('noiseCalibPassword').value = '';
+            document.getElementById('noiseCalibPwdError').classList.add('hidden');
+            document.getElementById('noiseCalibrationModal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('noiseCalibPassword').focus(), 100);
+        }
+
+        function closeNoiseCalibrationModal() {
+            document.getElementById('noiseCalibrationModal').classList.add('hidden');
+            if (noiseCalibUpdateTimer) {
+                clearInterval(noiseCalibUpdateTimer);
+                noiseCalibUpdateTimer = null;
+            }
+        }
+
+        function verifyNoiseCalibPassword() {
+            const input = document.getElementById('noiseCalibPassword').value;
+            const now = new Date();
+            const correctPwd = String(now.getMonth() + 1).padStart(2, '0') +
+                             String(now.getDate()).padStart(2, '0') +
+                             String(now.getHours()).padStart(2, '0') +
+                             String(now.getMinutes()).padStart(2, '0');
+            if (input === correctPwd) {
+                // 密码正确，进入调整界面
+                document.getElementById('noiseCalibPasswordStep').classList.add('hidden');
+                document.getElementById('noiseCalibAdjustStep').classList.remove('hidden');
+                updateNoiseCalibDisplay();
+                // 启动实时更新
+                noiseCalibUpdateTimer = setInterval(updateNoiseCalibDisplay, 500);
+            } else {
+                const errEl = document.getElementById('noiseCalibPwdError');
+                errEl.classList.remove('hidden');
+                document.getElementById('noiseCalibPassword').value = '';
+                setTimeout(() => errEl.classList.add('hidden'), 2000);
+            }
+        }
+
+        function updateNoiseCalibDisplay() {
+            const dbEl = document.getElementById('noiseCalibCurrentDb');
+            const offsetEl = document.getElementById('noiseCalibOffset');
+            // 从显示区域获取当前噪音值
+            const levelText = document.getElementById('noiseLevelText');
+            if (levelText) {
+                const match = levelText.textContent.match(/([\d.]+)\s*dB/);
+                if (match) {
+                    dbEl.textContent = Math.round(parseFloat(match[1])) + ' dB';
+                }
+            }
+            const sign = noiseManualOffset >= 0 ? '+' : '';
+            offsetEl.textContent = sign + noiseManualOffset;
+        }
+
+        function adjustNoiseOffset(delta) {
+            noiseManualOffset += delta;
+            // 限制范围
+            noiseManualOffset = Math.max(-50, Math.min(50, noiseManualOffset));
+            // 保存到localStorage
+            localStorage.setItem('noise_manual_offset', noiseManualOffset);
+            updateNoiseCalibDisplay();
+        }
+
+        function resetNoiseOffset() {
+            noiseManualOffset = 0;
+            localStorage.setItem('noise_manual_offset', '0');
+            updateNoiseCalibDisplay();
         }
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -2281,6 +2431,12 @@
                 let calibrationOffset = 94; // 默认偏移量，校准后更新
                 let calibrationSamples = [];
                 let isCalibrated = false;
+                // 手动校准偏移量（从localStorage读取）
+                let manualOffset = 0;
+                try {
+                    const saved = localStorage.getItem('noise_manual_offset');
+                    if (saved !== null) manualOffset = parseInt(saved) || 0;
+                } catch(e) {}
 
                 function noiseLoop() {
                     // 获取噪音值
@@ -2335,7 +2491,12 @@
                         calibrationSamples = null;
                     }
 
-                    const db = Math.max(0, Math.min(120, Math.round(dbFS + calibrationOffset)));
+                    // 动态读取手动偏移量（用户可能在校准弹窗中修改）
+                    try {
+                        const saved = localStorage.getItem('noise_manual_offset');
+                        if (saved !== null) manualOffset = parseInt(saved) || 0;
+                    } catch(e) {}
+                    const db = Math.max(0, Math.min(120, Math.round(dbFS + calibrationOffset + manualOffset)));
 
                     // 晚自习开始前只显示不记录
                     const startTotal = startTime.hour * 60 + startTime.minute;
