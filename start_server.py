@@ -44,6 +44,50 @@ SCHOOL_END_MINUTE = 45
 SHUTDOWN_DELAY_MIN = 1     # 放学后1分钟触发
 SHUTDOWN_COUNTDOWN = 15    # 关机倒计时（秒）
 
+# 本地时间表缓存（不依赖云数据库，优先使用）
+def get_local_schedule_path():
+    """获取本地时间表缓存文件路径"""
+    return os.path.join(get_app_dir(), 'schedule_cache.json')
+
+def save_local_schedule(date_str, start_time, homework_list):
+    """保存时间表到本地文件"""
+    try:
+        data = {
+            'date': date_str,
+            'start_time': start_time,
+            'homework_list': homework_list,
+            'saved_at': datetime.datetime.now().isoformat()
+        }
+        path = get_local_schedule_path()
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"[时间表] 本地缓存已保存: {path}")
+        return True
+    except Exception as e:
+        print(f"[时间表] 本地缓存保存失败: {e}")
+        return False
+
+def get_local_schedule():
+    """读取本地时间表缓存"""
+    try:
+        path = get_local_schedule_path()
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        print(f"[时间表] 本地缓存读取失败: {e}")
+        return None
+
+def get_local_schedule_exists():
+    """检查今日是否有本地时间表缓存"""
+    today = datetime.date.today().isoformat()
+    local = get_local_schedule()
+    if local and local.get('date') == today:
+        return True
+    return False
+
 # ============================================================
 # 路径工具
 # ============================================================
@@ -429,10 +473,18 @@ def cleanup_loop():
 # 放学自动关机
 # ============================================================
 def get_today_schedule_exists():
-    """检查今日是否有晚自习时间表（避免非晚自习日触发关机）"""
+    """检查今日是否有晚自习时间表（优先本地缓存，其次云数据库）"""
+    # 优先检查本地缓存（最可靠）
+    if get_local_schedule_exists():
+        print("[放学] 检测到本地时间表缓存")
+        return True
+    # 本地没有，尝试云数据库
     today = datetime.date.today().isoformat()
     result = sb_request('GET', f'/rest/schedules?date=eq.{today}&select=date&limit=1')
-    return bool(result)
+    if result:
+        print("[放学] 检测到云端时间表")
+        return True
+    return False
 
 def show_shutdown_countdown():
     """显示放学关机倒计时窗口（置顶显示）"""
@@ -1611,6 +1663,8 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_upload_file()
         elif self.path == '/api/upload-init':
             self.handle_upload_init()
+        elif self.path == '/api/save-schedule':
+            self.handle_save_schedule()
         else:
             self.send_error(404, 'Not Found')
 
@@ -1691,6 +1745,52 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+    def handle_save_schedule(self):
+        """保存晚自习时间表到本地缓存"""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+            data = json.loads(body) if body else {}
+
+            date_str = data.get('date')
+            start_time = data.get('startTime')
+            homework_list = data.get('homeworkList', [])
+
+            if not date_str or not start_time or not homework_list:
+                response = json.dumps({
+                    'success': False,
+                    'error': '缺少必要参数（date, startTime, homeworkList）'
+                }, ensure_ascii=False).encode('utf-8')
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Length', str(len(response)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(response)
+                return
+
+            ok = save_local_schedule(date_str, start_time, homework_list)
+            response = json.dumps({
+                'success': ok,
+                'message': '时间表已保存到本地' if ok else '保存失败'
+            }, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(response)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(response)
+        except Exception as e:
+            print(f"[时间表] 保存请求处理失败: {e}")
+            traceback.print_exc()
+            response = json.dumps({'success': False, 'error': str(e)}, ensure_ascii=False).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(response)))
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(response)
 
