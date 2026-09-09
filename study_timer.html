@@ -238,7 +238,7 @@
 
         <!-- 标题栏 -->
         <div class="absolute top-8 left-1/2 transform -translate-x-1/2 flex items-center gap-4">
-            <img src="icon.jpg" alt="图标" class="w-24 h-24 rounded-full shadow-lg">
+            <img src="icon.jpg" alt="图标" class="w-24 h-24 rounded-full shadow-lg cursor-pointer" onclick="refreshTimerDisplay()" title="点击刷新时间">
             <h1 class="text-3xl font-bold text-white drop-shadow-lg whitespace-nowrap text-center">高二（13）班晚自习作业计时系统</h1>
         </div>
 
@@ -1275,13 +1275,11 @@
 
         function loadTodaySchedule() {
             const today = new Date().toISOString().split('T')[0];
-            DB.getSchedule(today).then(function(schedule) {
-                if (!schedule || !schedule.homework_list || schedule.homework_list.length === 0) return;
-                // 确认是否加载
-                if (!confirm('检测到今日已保存的作业表，是否加载？')) return;
+
+            function applySchedule(start_time, hw_list) {
                 // 填充开始时间
-                if (schedule.start_time) {
-                    const parts = schedule.start_time.split(':');
+                if (start_time) {
+                    const parts = start_time.split(':');
                     if (parts.length === 2) {
                         startTime.hour = parseInt(parts[0]);
                         startTime.minute = parseInt(parts[1]);
@@ -1291,7 +1289,7 @@
                 // 填充作业列表
                 homeworkList = [];
                 currentRowId = 1;
-                schedule.homework_list.forEach(function(item) {
+                hw_list.forEach(function(item) {
                     homeworkList.push({
                         id: currentRowId++,
                         subject: item.subject || null,
@@ -1299,21 +1297,64 @@
                     });
                 });
                 updateTableRows();
+            }
+
+            // 先尝试云端加载
+            DB.getSchedule(today).then(function(schedule) {
+                if (schedule && schedule.homework_list && schedule.homework_list.length > 0) {
+                    if (!confirm('检测到今日已保存的作业表（云端），是否加载？')) return;
+                    applySchedule(schedule.start_time, schedule.homework_list);
+                    return;
+                }
+                // 云端没有，尝试 localStorage
+                try {
+                    const cached = localStorage.getItem('schedule_cache_' + today);
+                    if (cached) {
+                        const data = JSON.parse(cached);
+                        if (data && data.homeworkList && data.homeworkList.length > 0) {
+                            if (!confirm('检测到今日已保存的作业表（本地），是否加载？')) return;
+                            applySchedule(data.startTime, data.homeworkList);
+                        }
+                    }
+                } catch(e) {
+                    console.warn('从localStorage加载时间表失败:', e);
+                }
             }).catch(function(e) {
-                console.log('加载当日作业失败:', e);
+                console.log('云端加载当日作业失败，尝试本地缓存:', e);
+                // 云端失败，也尝试 localStorage
+                try {
+                    const cached = localStorage.getItem('schedule_cache_' + today);
+                    if (cached) {
+                        const data = JSON.parse(cached);
+                        if (data && data.homeworkList && data.homeworkList.length > 0) {
+                            if (!confirm('检测到今日已保存的作业表（本地），是否加载？')) return;
+                            applySchedule(data.startTime, data.homeworkList);
+                        }
+                    }
+                } catch(e2) {
+                    console.warn('从localStorage加载时间表失败:', e2);
+                }
             });
         }
 
         function backToMenu() {
-            clearAllTimers();
-            hideAllModes();
+            try {
+                clearAllTimers();
+            } catch(e) { console.warn('clearAllTimers error:', e); }
+            try {
+                hideAllModes();
+            } catch(e) { console.warn('hideAllModes error:', e); }
             // 退出全屏
-            if (document.fullscreenElement) {
-                if (document.exitFullscreen) document.exitFullscreen();
-                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-                else if (document.msExitFullscreen) document.msExitFullscreen();
-            }
-            document.getElementById('mainMenu').classList.remove('hidden');
+            try {
+                if (document.fullscreenElement) {
+                    if (document.exitFullscreen) document.exitFullscreen();
+                    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                    else if (document.msExitFullscreen) document.msExitFullscreen();
+                }
+            } catch(e) { console.warn('exitFullscreen error:', e); }
+            try {
+                document.getElementById('mainMenu').classList.remove('hidden');
+            } catch(e) { console.warn('show mainMenu error:', e); }
         }
 
         function hideAllModes() {
@@ -1914,7 +1955,7 @@
             initModifyRequestSubscription();
         }
 
-        // 广播作业时间表给教师端（优先数据库存储，ntfy 作为备用）
+        // 广播作业时间表给教师端（优先本地后端+数据库存储，ntfy 作为备用）
         function broadcastSchedule() {
             var schedulePayload = {
                 type: 'schedule',
@@ -1924,11 +1965,46 @@
                 startTime: String(startTime.hour).padStart(2, '0') + ':' + String(startTime.minute).padStart(2, '0'),
                 date: new Date().toISOString().split('T')[0]
             };
+
+            // 【第0步】优先保存到本地后端（最可靠，确保关机程序能检测到）
+            var localSaved = false;
+            try {
+                fetch('/api/save-schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        date: schedulePayload.date,
+                        startTime: schedulePayload.startTime,
+                        homeworkList: schedulePayload.homeworkList
+                    })
+                }).then(function(r) {
+                    if (r.ok) {
+                        localSaved = true;
+                        console.log('本地后端时间表保存成功');
+                    } else {
+                        console.warn('本地后端时间表保存失败:', r.status);
+                    }
+                }).catch(function(err) {
+                    console.warn('本地后端时间表保存请求失败:', err);
+                });
+            } catch(e) {
+                console.warn('本地后端保存异常:', e);
+            }
+
+            // 同时保存到 localStorage 作为兜底
+            try {
+                localStorage.setItem('schedule_cache_' + schedulePayload.date, JSON.stringify({
+                    startTime: schedulePayload.startTime,
+                    homeworkList: schedulePayload.homeworkList,
+                    savedAt: Date.now()
+                }));
+            } catch(e) {}
+
             // 优先数据库存储（最多重试10次，每次超时20s）
-            showScheduleStatus('正在上传时间表至数据库…', 'info');
+            showScheduleStatus('正在上传时间表…', 'info');
             DB.saveSchedule(schedulePayload.date, schedulePayload.startTime, schedulePayload.homeworkList).then(function(ok) {
                 if (ok) {
-                    showScheduleStatus('时间表已保存至数据库', 'success');
+                    showScheduleStatus('时间表已保存（云端+本地）', 'success');
                     DB.deleteOldSchedules(schedulePayload.date);
                     // 数据库成功，同时通过 ntfy 广播给教师端
                     fetch('https://ntfy.sh', {
@@ -1945,7 +2021,7 @@
                     });
                 } else {
                     // 数据库10次重试全部失败，改用 ntfy.sh 上传
-                    showScheduleStatus('数据库上传失败（已重试10次），正在通过ntfy发送…', 'error');
+                    showScheduleStatus('云端保存失败（本地已保存），正在通过ntfy发送…', 'error');
                     fetch('https://ntfy.sh', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1956,16 +2032,16 @@
                             tags: ['schedule']
                         })
                     }).then(function() {
-                        showScheduleStatus('已通过ntfy.sh发送时间表', 'success');
+                        showScheduleStatus('已通过ntfy.sh发送时间表（本地已保存）', 'success');
                     }).catch(function(err) {
                         console.warn('ntfy上传作业时间表失败:', err);
-                        showScheduleStatus('时间表上传失败（数据库和ntfy均失败）', 'error');
+                        showScheduleStatus('云端和ntfy均失败（本地已保存）', 'error');
                     });
                 }
             }).catch(function(e) {
                 console.warn('数据库保存异常:', e);
                 // 异常情况也走 ntfy 备用
-                showScheduleStatus('数据库异常，正在通过ntfy发送…', 'error');
+                showScheduleStatus('云端异常（本地已保存），正在通过ntfy发送…', 'error');
                 fetch('https://ntfy.sh', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1976,9 +2052,9 @@
                         tags: ['schedule']
                     })
                 }).then(function() {
-                    showScheduleStatus('已通过ntfy.sh发送时间表', 'success');
+                    showScheduleStatus('已通过ntfy.sh发送（本地已保存）', 'success');
                 }).catch(function(err) {
-                    showScheduleStatus('时间表上传失败', 'error');
+                    showScheduleStatus('上传失败（本地已保存）', 'error');
                 });
             });
         }
@@ -2177,6 +2253,18 @@
         }
 
         let lastDisplayedSecond = -1;
+
+        function refreshTimerDisplay() {
+            // 重置 lastDisplayedSecond 强制立即刷新显示
+            lastDisplayedSecond = -1;
+            // 如果计时器停止了，重新启动
+            if (!timerInterval) {
+                timerInterval = setInterval(updateNightTimer, 200);
+            }
+            // 立即执行一次更新
+            updateNightTimer();
+        }
+
         function updateNightTimer() {
             const now = new Date();
             const currentHour = now.getHours();
@@ -2212,8 +2300,15 @@
                 // 延迟10秒后自动显示噪音报告
                 if (lastHomeworkIndex !== -3) {
                     lastHomeworkIndex = -3;
-                    setTimeout(() => {
-                        showNoiseReport();
+                    // 保存到 nightFinishedTimer 以便清理
+                    if (nightFinishedTimer) { clearTimeout(nightFinishedTimer); nightFinishedTimer = null; }
+                    nightFinishedTimer = setTimeout(() => {
+                        nightFinishedTimer = null;
+                        try {
+                            showNoiseReport();
+                        } catch (e) {
+                            console.error('自动显示噪音报告失败:', e);
+                        }
                     }, 10 * 1000);
                 }
                 return;
@@ -2761,34 +2856,58 @@
 
         // ==================== 噪音报告 ====================
         function showNoiseReport() {
-            if (noiseData.length === 0) return;
+            try {
+                const overlay = document.getElementById('noiseReportOverlay');
+                if (!overlay) { console.warn('noiseReportOverlay not found'); return; }
 
-            const dbs = noiseData.map(d => d.db);
-            const maxDb = Math.max(...dbs);
-            const minDb = Math.min(...dbs);
-            const avgDb = Math.round(dbs.reduce((a, b) => a + b, 0) / dbs.length);
+                const statsEl = document.getElementById('noiseReportStats');
 
-            // 显示统计信息
-            const statsEl = document.getElementById('noiseReportStats');
-            if (statsEl) {
-                const equiv = getNoiseEquivalent(avgDb);
-                statsEl.innerHTML = `最大噪音：<span class="stat-max">${maxDb}</span>dB&emsp;&emsp;最小噪音：<span class="stat-min">${minDb}</span>dB&emsp;&emsp;平均噪音：<span style="color:${equiv.color};font-weight:700">${avgDb}</span>dB <span style="color:${equiv.color};font-size:0.9em">${equiv.text}</span>`;
-            }
+                // 无数据时也显示 overlay，给出提示
+                if (!noiseData || noiseData.length === 0) {
+                    console.warn('showNoiseReport: noiseData is empty');
+                    if (statsEl) {
+                        statsEl.innerHTML = '<span style="color:#f59e0b;font-size:1.1em">暂无噪音监测数据（麦克风可能未授权或监测未启动）</span>';
+                    }
+                    overlay.classList.remove('hidden');
+                    // 清空 canvas
+                    const reportCanvas = document.getElementById('noiseReportCanvas');
+                    if (reportCanvas) {
+                        const ctx = reportCanvas.getContext('2d');
+                        if (ctx) ctx.clearRect(0, 0, reportCanvas.width, reportCanvas.height);
+                    }
+                    return;
+                }
 
-            // 先显示覆盖层，再获取尺寸
-            const overlay = document.getElementById('noiseReportOverlay');
-            overlay.classList.remove('hidden');
+                const dbs = noiseData.map(d => d.db);
+                const maxDb = Math.max(...dbs);
+                const minDb = Math.min(...dbs);
+                const avgDb = Math.round(dbs.reduce((a, b) => a + b, 0) / dbs.length);
 
-            // 延迟一帧确保DOM渲染完成后再绘制
-            requestAnimationFrame(() => {
-                const reportCanvas = document.getElementById('noiseReportCanvas');
-                if (reportCanvas) {
-                    const rect = reportCanvas.parentElement.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0) return; // 安全检查
-                    reportCanvas.width = rect.width * window.devicePixelRatio;
-                    reportCanvas.height = rect.height * window.devicePixelRatio;
-                    const rCtx = reportCanvas.getContext('2d');
-                    rCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+                // 显示统计信息
+                if (statsEl) {
+                    const equiv = getNoiseEquivalent(avgDb);
+                    statsEl.innerHTML = `最大噪音：<span class="stat-max">${maxDb}</span>dB&emsp;&emsp;最小噪音：<span class="stat-min">${minDb}</span>dB&emsp;&emsp;平均噪音：<span style="color:${equiv.color};font-weight:700">${avgDb}</span>dB <span style="color:${equiv.color};font-size:0.9em">${equiv.text}</span>`;
+                }
+
+                // 先显示覆盖层，再获取尺寸
+                overlay.classList.remove('hidden');
+
+                // 延迟一帧确保DOM渲染完成后再绘制
+                requestAnimationFrame(() => {
+                    try {
+                        const reportCanvas = document.getElementById('noiseReportCanvas');
+                        if (!reportCanvas) return;
+
+                        const rect = reportCanvas.parentElement.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) {
+                            console.warn('noiseReportCanvas parent has zero size');
+                            return;
+                        }
+                        reportCanvas.width = rect.width * window.devicePixelRatio;
+                        reportCanvas.height = rect.height * window.devicePixelRatio;
+                        const rCtx = reportCanvas.getContext('2d');
+                        if (!rCtx) return;
+                        rCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
                     const w = rect.width;
                     const h = rect.height;
@@ -2927,12 +3046,28 @@
                         rCtx.textAlign = 'center';
                         rCtx.fillText(minDb + 'dB', minX, minY + 18);
                     }
-                }
-            });
+                    } catch (e) {
+                        console.error('绘制噪音报告图表失败:', e);
+                    }
+                });
+            } catch (e) {
+                console.error('showNoiseReport 异常:', e);
+                // 出错时也尝试显示 overlay 和错误信息
+                try {
+                    const overlay = document.getElementById('noiseReportOverlay');
+                    const statsEl = document.getElementById('noiseReportStats');
+                    if (overlay && statsEl) {
+                        statsEl.innerHTML = '<span style="color:#ef4444;font-size:1.1em">噪音报告生成失败</span>';
+                        overlay.classList.remove('hidden');
+                    }
+                } catch (e2) { /* ignore */ }
+            }
         }
 
         function closeNoiseReport() {
-            document.getElementById('noiseReportOverlay').classList.add('hidden');
+            try {
+                document.getElementById('noiseReportOverlay').classList.add('hidden');
+            } catch (e) { console.warn('closeNoiseReport error:', e); }
         }
 
         // ==================== 修改当前项任务时长 ====================
