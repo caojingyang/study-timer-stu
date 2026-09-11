@@ -30,13 +30,16 @@ import urllib.error
 # 配置
 # ============================================================
 PORT = 8080
-# 数据库已迁移至腾讯 CloudBase PostgreSQL（PostgREST 兼容）
-CB_DB_URL = 'https://wh12z213-d4gi5jt764f91a558.api.tcloudbasegateway.com/v1/rdb'
-CB_API_KEY = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjNmYjk2NWJkLWU5OTQtNDc5YS04MjEwLWIzNTY0ZTM1ODY3MyJ9.eyJhdWQiOiJ3aDEyejIxMy1kNGdpNWp0NzY0ZjkxYTU1OCIsImV4cCI6MjUzNDAyMzAwNzk5LCJpYXQiOjE3ODY3ODU0NTcsImF0X2hhc2giOiJBcmpXelNNT1JFQ3ZtT01aT1lPbHBBIiwicHJvamVjdF9pZCI6IndoMTJ6MjEzLWQ0Z2k1anQ3NjRmOTFhNTU4IiwibWV0YSI6eyJwbGF0Zm9ybSI6IkFwaUtleSJ9LCJyb2xlIjoic2VydmljZV9yb2xlIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiYXBpa2V5IiwicHJvdmlkZXJzIjpbImFwaWtleSJdfSwiYWRtaW5pc3RyYXRvcl9pZCI6IjIwODg1NTMxNzA1NzY4NjczMjgiLCJ1c2VyX3R5cGUiOiIiLCJjbGllbnRfdHlwZSI6ImNsaWVudF9zZXJ2ZXIiLCJpc19zeXN0ZW1fYWRtaW4iOnRydWV9.T8YR_AZQ3lPLyDfp_tCJ0baefybTYO9Q-LtFbdCsE9bjjYvJoONyIiVk5pWGcWriaAJoQxhxn68gFwO9lsQF5U4pI_2sbkmBBXIzAbkZy1cW5ABDhREAbBYR21LrPFd5nkms0hjH5TwRR7ll8i6L1fXKoZZosGIQBPECtr96A800dXishQ7NZqx8Afcy1mRm_x1Bt8ChTVoqCOZzK8cOcTHQ3BFYs8t2FXHM-tbO0MsegilFxbJ87OxzIfsn70Whv72YormFiyQXCDL1ZrcNvMFR1ORih123nrQlhUsAXfrtQC643lbFWCk4VzEYDsp2VkYhOr13Sm-L-4faYYrGvA'
+# 腾讯 CloudBase 数据库配置（PostgREST 兼容）
+CLOUDBASE_ENV_ID = 'wh12z213-d4gi5jt764f91a558'
+CLOUDBASE_API_KEY = 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjNmYjk2NWJkLWU5OTQtNDc5YS04MjEwLWIzNTY0ZTM1ODY3MyJ9.eyJhdWQiOiJ3aDEyejIxMy1kNGdpNWp0NzY0ZjkxYTU1OCIsImV4cCI6MjUzNDAyMzAwNzk5LCJpYXQiOjE3ODY3ODU0NTcsImF0X2hhc2giOiJBcmpXelNNT1JFQ3ZtT01aT1lPbHBBIiwicHJvamVjdF9pZCI6IndoMTJ6MjEzLWQ0Z2k1anQ3NjRmOTFhNTU4IiwibWV0YSI6eyJwbGF0Zm9ybSI6IkFwaUtleSJ9LCJyb2xlIjoic2VydmljZV9yb2xlIiwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiYXBpa2V5IiwicHJvdmlkZXJzIjpbImFwaWtleSJdfSwiYWRtaW5pc3RyYXRvcl9pZCI6IjIwODg1NTMxNzA1NzY4NjczMjgiLCJ1c2VyX3R5cGUiOiIiLCJjbGllbnRfdHlwZSI6ImNsaWVudF9zZXJ2ZXIiLCJpc19zeXN0ZW1fYWRtaW4iOnRydWV9.T8YR_AZQ3lPLyDfp_tCJ0baefybTYO9Q-LtFbdCsE9bjjYvJoONyIiVk5pWGcWriaAJoQxhxn68gFwO9lsQF5U4pI_2sbkmBBXIzAbkZy1cW5ABDhREAbBYR21LrPFd5nkms0hjH5TwRR7ll8i6L1fXKoZZosGIQBPECtr96A800dXishQ7NZqx8Afcy1mRm_x1Bt8ChTVoqCOZzK8cOcTHQ3BFYs8t2FXHM-tbO0MsegilFxbJ87OxzIfsn70Whv72YormFiyQXCDL1ZrcNvMFR1ORih123nrQlhUsAXfrtQC643lbFWCk4VzEYDsp2VkYhOr13Sm-L-4faYYrGvA'
+# CloudBase PostgREST API 地址
+CB_DB_URL = f'https://{CLOUDBASE_ENV_ID}.api.tcloudbasegateway.com/v1/rdb'
+CB_API_KEY = CLOUDBASE_API_KEY
 HEARTBEAT_INTERVAL = 30  # 秒
 CLEANUP_INTERVAL = 1800  # 数据库清理间隔（秒），30分钟
 APP_NAME = "晚自习系统"  # 开机自启注册名
-APP_VERSION = "v2.9.1"
+APP_VERSION = "v2.9.2"
 
 # 放学自动关机配置
 SCHOOL_END_HOUR = 21       # 放学时间：21:45
@@ -1129,6 +1132,7 @@ def show_notification_window_impl(sender, realname, files):
 # ============================================================
 # 全局标记：防止重复打开窗口
 _file_list_window_open = False
+_file_list_window_open_time = 0  # 打开时间戳，用于超时重置
 _webview_started = False
 
 def show_received_files_window():
@@ -1136,34 +1140,45 @@ def show_received_files_window():
 
     所有 UI 工作（WebView 或 Tkinter 回退）都在独立的工作线程中执行，
     调用方（托盘菜单/HTTP 等）不会被阻塞。通过 _file_list_window_open
-    标记防止并发重复打开。
+    标记防止并发重复打开。增加 30 秒超时自动重置机制。
     """
-    global _file_list_window_open
+    global _file_list_window_open, _file_list_window_open_time
 
-    # 防止重复打开
+    # 防止重复打开（超过30秒自动重置，避免卡死后永久无法打开）
     if _file_list_window_open:
-        print("[文件列表] 窗口已打开，跳过重复请求")
-        return
+        elapsed = time.time() - _file_list_window_open_time
+        if elapsed < 30:
+            print(f"[文件列表] 窗口已打开（{elapsed:.0f}s），跳过重复请求")
+            return
+        else:
+            print(f"[文件列表] 窗口标志已超时（{elapsed:.0f}s），强制重置")
+            _file_list_window_open = False
 
     _file_list_window_open = True
+    _file_list_window_open_time = time.time()
     threading.Thread(target=_show_received_files_window_worker, daemon=True).start()
 
 
 def _show_received_files_window_worker():
-    """文件列表窗口工作线程：优先 WebView，失败回退 Tkinter"""
+    """文件列表窗口工作线程：优先 Tkinter（最稳定），pywebview 作为可选"""
     global _file_list_window_open, _webview_started
     try:
-        # 优先尝试 pywebview（HTML界面，不唤起浏览器，不卡顿）
+        # 优先使用 Tkinter（最稳定，不依赖外部库和 HTTP 服务器）
+        # 只在 ui.html 存在且 pywebview 可用时才尝试 WebView
         ui_path = get_ui_path()
+        use_webview = False
         if os.path.exists(ui_path):
             try:
                 import webview
+                use_webview = True
+            except ImportError:
+                pass
+
+        if use_webview:
+            try:
                 url = f'http://127.0.0.1:{PORT}/ui.html'
                 print(f"[文件列表] 使用 WebView 打开: {url}")
 
-                # 首次启动需调用 webview.start()（阻塞至窗口关闭）；
-                # 已启动则直接创建新窗口。两者均在当前工作线程中执行，
-                # 不会阻塞调用方。
                 if not _webview_started:
                     webview.create_window(
                         '接收文件列表',
@@ -1176,7 +1191,6 @@ def _show_received_files_window_worker():
                     )
                     _webview_started = True
                     webview.start(debug=False)
-                    # 所有窗口关闭后，重置标志以便下次重新启动事件循环
                     _webview_started = False
                 else:
                     webview.create_window(
@@ -1189,16 +1203,23 @@ def _show_received_files_window_worker():
                         background_color='#667eea'
                     )
                 return
-            except ImportError:
-                print("[文件列表] pywebview 未安装，使用 Tkinter 界面")
             except Exception as e:
-                print(f"[文件列表] WebView 异常: {e}")
+                print(f"[文件列表] WebView 异常，回退到 Tkinter: {e}")
                 traceback.print_exc()
-        # 回退到 Tkinter
+
+        # 回退到 Tkinter（稳定可靠）
         show_received_files_window_tk()
     except Exception as e:
         print(f"[文件列表] 窗口显示失败: {e}")
         traceback.print_exc()
+        # 最终兜底：直接打开接收文件夹
+        try:
+            receive_dir = get_receive_dir()
+            os.makedirs(receive_dir, exist_ok=True)
+            _open_file_dir_async(receive_dir)
+            print(f"[文件列表] 已直接打开接收文件夹: {receive_dir}")
+        except Exception as e2:
+            print(f"[文件列表] 打开接收文件夹也失败: {e2}")
     finally:
         _file_list_window_open = False
 
@@ -1973,7 +1994,18 @@ def create_tray_icon_impl():
         image = Image.new('RGBA', (64, 64), (59, 130, 246, 255))
 
     def on_open_files(icon, item):
-        threading.Thread(target=show_received_files_window, daemon=True).start()
+        """打开接收文件列表：优先弹出文件列表窗口，失败则直接打开文件夹"""
+        try:
+            threading.Thread(target=show_received_files_window, daemon=True).start()
+        except Exception as e:
+            print(f"[托盘] 打开文件列表失败: {e}")
+            # 兜底：直接打开接收文件夹
+            try:
+                receive_dir = get_receive_dir()
+                os.makedirs(receive_dir, exist_ok=True)
+                _open_file_dir_async(receive_dir)
+            except Exception as e2:
+                print(f"[托盘] 打开接收文件夹也失败: {e2}")
 
     def on_open_timer(icon, item):
         import webbrowser
