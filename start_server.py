@@ -44,6 +44,10 @@ SCHOOL_END_MINUTE = 45
 SHUTDOWN_DELAY_MIN = 1     # 放学后1分钟触发
 SHUTDOWN_COUNTDOWN = 15    # 关机倒计时（秒）
 
+# 自动打开计时系统配置
+AUTO_OPEN_HOUR = 18        # 自动打开时间：18:30
+AUTO_OPEN_MINUTE = 30
+
 # 本地时间表缓存（不依赖云数据库，优先使用）
 def get_local_schedule_path():
     """获取本地时间表缓存文件路径"""
@@ -657,6 +661,32 @@ def show_shutdown_countdown_impl():
     pulse_animation()
     update_countdown()
     root.mainloop()
+
+
+def auto_open_timer_monitor():
+    """自动在18:30打开晚自习计时系统（每天只触发一次）"""
+    import webbrowser
+    triggered_date = None
+    while True:
+        try:
+            now = datetime.datetime.now()
+            today_str = now.date().isoformat()
+
+            if triggered_date != today_str:
+                # 计算目标时间
+                target_time = now.replace(hour=AUTO_OPEN_HOUR, minute=AUTO_OPEN_MINUTE, second=0, microsecond=0)
+
+                if now >= target_time:
+                    triggered_date = today_str
+                    print(f"[自动打开] 已到 {AUTO_OPEN_HOUR}:{AUTO_OPEN_MINUTE:02d}，自动打开计时系统")
+                    try:
+                        webbrowser.open(f'http://localhost:{PORT}/study_timer.html')
+                    except Exception as e:
+                        print(f"[自动打开] 打开浏览器失败: {e}")
+        except Exception as e:
+            print(f"[自动打开] 监控异常: {e}")
+
+        time.sleep(10)
 
 
 def school_end_monitor():
@@ -2093,6 +2123,12 @@ def main():
     if not silent:
         print(f"[放学] 放学自动关机监控已启动（{SCHOOL_END_HOUR}:{SCHOOL_END_MINUTE:02d} "
               f"后{SHUTDOWN_DELAY_MIN}分钟触发，倒计时{SHUTDOWN_COUNTDOWN}s）")
+
+    # 启动18:30自动打开计时系统监控线程
+    auto_open_thread = threading.Thread(target=auto_open_timer_monitor, daemon=True)
+    auto_open_thread.start()
+    if not silent:
+        print(f"[自动打开] {AUTO_OPEN_HOUR}:{AUTO_OPEN_MINUTE:02d} 自动打开计时系统监控已启动")
 
     # 启动 HTTP 服务器
     httpd = http.server.HTTPServer(('0.0.0.0', PORT), CORSHandler)
