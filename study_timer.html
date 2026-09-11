@@ -3515,7 +3515,7 @@
 
 
         // ==================== 版本检测 ====================
-        const CURRENT_VERSION = 'v1.6.0';
+        const CURRENT_VERSION = 'v1.8.0';
         const GITHUB_VERSION_URL = 'https://raw.githubusercontent.com/wh13z213/study-timer/main/version.txt';
 
         function checkVersionUpdate() {
@@ -3590,12 +3590,39 @@
 
 
     <!-- 版本号标注 -->
-    <div class="version-label">当前版本：v1.6.0</div>
+    <div class="version-label">当前版本：v1.8.0</div>
 
     <!-- 更新历史弹窗 -->
     <div id="changelogOverlay" class="changelog-overlay hidden">
         <div class="changelog-panel">
             <h2>📜 晚自习计时系统 — 更新历史<button class="changelog-close" onclick="hideChangelog()">&times;</button></h2>
+
+            <h3>v1.8.0</h3>
+            <ul>
+                <li>修复噪音报告覆盖层 CSS 样式缺失导致放学后不显示噪音报告的问题</li>
+                <li>修复时间表保存到本地后端的跨域请求失败问题（改用绝对地址 + CORS）</li>
+                <li>新增 18:30 自动打开晚自习计时系统功能（本地服务器监控线程）</li>
+                <li>优化加载时间表逻辑：已加载云端时间表后不再重复提示加载本地缓存</li>
+                <li>修复移动端后台添加手机号后刷新丢失的问题（SQL 查询未 SELECT phone 字段）</li>
+                <li>时间表保存新增三重备份：本地后端文件 + localStorage + 云数据库</li>
+                <li>关机程序优先检测本地时间表缓存文件，确保即使云端不可达也能正常触发</li>
+            </ul>
+
+            <h3>v1.7.1</h3>
+            <ul>
+                <li>修复时间停止跳动问题：点击标题前图标可刷新时间显示（不刷新网页）</li>
+                <li>修复计时系统右上角"返回"按钮无反应：全面添加 try-catch 错误处理</li>
+                <li>修复晚自习结束后噪音报告不显示：添加完整错误捕获和空数据提示</li>
+                <li>修复时间表未保存至数据库导致关机程序无法检测的问题</li>
+            </ul>
+
+            <h3>v1.7.0</h3>
+            <ul>
+                <li>噪音监测新增自适应校准功能：前30秒自动收集环境基线数据</li>
+                <li>新增手动校准偏移量功能（localStorage 存储）</li>
+                <li>噪音数据采样频率优化为每2秒一次，降低 CPU 和内存占用</li>
+                <li>新增安静提示功能：持续噪音超标60秒后自动提醒</li>
+            </ul>
 
             <h3>v1.6.0</h3>
             <ul>
