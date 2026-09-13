@@ -39,7 +39,7 @@ CB_API_KEY = CLOUDBASE_API_KEY
 HEARTBEAT_INTERVAL = 30  # 秒
 CLEANUP_INTERVAL = 1800  # 数据库清理间隔（秒），30分钟
 APP_NAME = "晚自习系统"  # 开机自启注册名
-APP_VERSION = "v2.9.2"
+APP_VERSION = "v3.1.0"
 
 # 放学自动关机配置
 SCHOOL_END_HOUR = 21       # 放学时间：21:45
@@ -48,8 +48,8 @@ SHUTDOWN_DELAY_MIN = 1     # 放学后1分钟触发
 SHUTDOWN_COUNTDOWN = 15    # 关机倒计时（秒）
 
 # 自动打开计时系统配置
-AUTO_OPEN_HOUR = 18        # 自动打开时间：18:30
-AUTO_OPEN_MINUTE = 30
+AUTO_OPEN_HOUR = 18        # 自动打开时间：18:40
+AUTO_OPEN_MINUTE = 40
 
 # 本地时间表缓存（不依赖云数据库，优先使用）
 def get_local_schedule_path():
@@ -1447,6 +1447,14 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_open_file_dir()
         elif path == '/api/open-receive-dir':
             self.handle_open_receive_dir()
+        elif path == '/api/remote/files':
+            self.handle_remote_list_files()
+        elif path == '/api/remote/download':
+            self.handle_remote_download()
+        elif path == '/api/remote/camera':
+            self.handle_remote_camera()
+        elif path == '/remote.html':
+            self.handle_remote_page()
         elif path == '/ui.html' or path == '/ui':
             self.handle_ui_page()
         else:
@@ -1716,6 +1724,16 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_upload_init()
         elif self.path == '/api/save-schedule':
             self.handle_save_schedule()
+        elif self.path == '/api/remote/upload':
+            self.handle_remote_upload()
+        elif self.path == '/api/remote/delete':
+            self.handle_remote_delete()
+        elif self.path == '/api/remote/mkdir':
+            self.handle_remote_mkdir()
+        elif self.path == '/api/remote/cmd':
+            self.handle_remote_cmd()
+        elif self.path == '/api/remote/cmd-stream':
+            self.handle_remote_cmd_stream()
         else:
             self.send_error(404, 'Not Found')
 
@@ -1844,6 +1862,521 @@ class CORSHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(response)
+
+    # ============================================================
+    # 远程管理 API
+    # ============================================================
+    def _remote_safe_path(self, rel_path):
+        """将相对路径转为安全绝对路径（防止目录穿越）"""
+        if sys.platform == 'win32':
+            base_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users'), 'Desktop')
+        else:
+            base_dir = os.path.expanduser('~/Desktop')
+        # 规范化路径
+        abs_path = os.path.normpath(os.path.join(base_dir, rel_path))
+        # 安全检查：必须在 base_dir 下
+        if not abs_path.startswith(base_dir):
+            return None, base_dir
+        return abs_path, base_dir
+
+    def handle_remote_list_files(self):
+        """列出指定目录下的文件和文件夹"""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            rel_path = params.get('path', [''])[0]
+
+            abs_path, base_dir = self._remote_safe_path(rel_path)
+            if not abs_path:
+                self._send_json({'error': '路径不合法'}, 400)
+                return
+
+            if not os.path.exists(abs_path):
+                self._send_json({'error': '路径不存在', 'path': rel_path}, 404)
+                return
+
+            items = []
+            if os.path.isdir(abs_path):
+                for name in os.listdir(abs_path):
+                    item_path = os.path.join(abs_path, name)
+                    is_dir = os.path.isdir(item_path)
+                    size = 0 if is_dir else os.path.getsize(item_path)
+                    import datetime as _dt
+                    mtime = _dt.datetime.fromtimestamp(os.path.getmtime(item_path)).isoformat()
+                    items.append({
+                        'name': name,
+                        'isDir': is_dir,
+                        'size': size,
+                        'modified': mtime,
+                        'relPath': os.path.relpath(item_path, base_dir).replace('\\', '/')
+                    })
+                items.sort(key=lambda x: (not x['isDir'], x['name'].lower()))
+            else:
+                # 如果是文件，返回文件信息
+                size = os.path.getsize(abs_path)
+                items.append({
+                    'name': os.path.basename(abs_path),
+                    'isDir': False,
+                    'size': size,
+                    'modified': _dt.datetime.fromtimestamp(os.path.getmtime(abs_path)).isoformat(),
+                    'relPath': rel_path
+                })
+
+            self._send_json({'items': items, 'currentPath': rel_path, 'baseDir': base_dir})
+        except Exception as e:
+            print(f"[远程文件] 列出失败: {e}")
+            traceback.print_exc()
+            self._send_json({'error': str(e)}, 500)
+
+    def handle_remote_download(self):
+        """下载指定文件"""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            rel_path = params.get('path', [''])[0]
+
+            abs_path, _ = self._remote_safe_path(rel_path)
+            if not abs_path:
+                self.send_error(400, '路径不合法')
+                return
+            if not os.path.exists(abs_path) or not os.path.isfile(abs_path):
+                self.send_error(404, '文件不存在')
+                return
+
+            filename = os.path.basename(abs_path)
+            with open(abs_path, 'rb') as f:
+                data = f.read()
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.send_header('Content-Disposition', f'attachment; filename*=UTF-8\'\'{urllib.parse.quote(filename)}')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as e:
+            print(f"[远程文件] 下载失败: {e}")
+            self.send_error(500, str(e))
+
+    def handle_remote_upload(self):
+        """上传文件到指定路径"""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            content_type = self.headers.get('Content-Type', '')
+
+            if 'multipart/form-data' in content_type:
+                # multipart 上传
+                import tempfile
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length)
+
+                # 解析 multipart 边界
+                boundary = None
+                for part in content_type.split(';'):
+                    part = part.strip()
+                    if part.startswith('boundary='):
+                        boundary = part[len('boundary='):]
+                        break
+
+                if not boundary:
+                    self._send_json({'error': '缺少 boundary'}, 400)
+                    return
+
+                # 简单解析 multipart
+                boundary_bytes = ('--' + boundary).encode()
+                parts = body.split(boundary_bytes)
+
+                rel_path = None
+                file_data = None
+                filename = None
+
+                for part in parts:
+                    if not part or part == b'--\r\n' or part == b'--':
+                        continue
+                    # 去掉开头的 \r\n
+                    if part.startswith(b'\r\n'):
+                        part = part[2:]
+                    # 分离 header 和 body
+                    header_end = part.find(b'\r\n\r\n')
+                    if header_end == -1:
+                        continue
+                    header_str = part[:header_end].decode('utf-8', errors='replace')
+                    body_data = part[header_end + 4:]
+                    # 去掉结尾的 \r\n
+                    if body_data.endswith(b'\r\n'):
+                        body_data = body_data[:-2]
+
+                    if 'name="path"' in header_str:
+                        rel_path = body_data.decode('utf-8')
+                    elif 'name="file"' in header_str or 'filename=' in header_str:
+                        file_data = body_data
+                        # 提取 filename
+                        import re
+                        m = re.search(r'filename="([^"]*)"', header_str)
+                        if m:
+                            filename = m.group(1)
+
+                if not file_data or not filename:
+                    self._send_json({'error': '未找到文件数据'}, 400)
+                    return
+
+                # 构造目标路径
+                if rel_path:
+                    target_dir, base_dir = self._remote_safe_path(rel_path)
+                    if not target_dir:
+                        self._send_json({'error': '目标路径不合法'}, 400)
+                        return
+                else:
+                    target_dir, base_dir = self._remote_safe_path('')
+
+                os.makedirs(target_dir, exist_ok=True)
+                target_path = os.path.join(target_dir, filename)
+                with open(target_path, 'wb') as f:
+                    f.write(file_data)
+
+                print(f"[远程文件] 上传成功: {target_path}")
+                self._send_json({'success': True, 'path': os.path.relpath(target_path, base_dir).replace('\\', '/')})
+            else:
+                # 简单 JSON 上传（base64）
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                rel_path = data.get('path', '')
+                filename = data.get('filename', 'upload.bin')
+                file_b64 = data.get('data', '')
+
+                import base64
+                file_data = base64.b64decode(file_b64)
+
+                target_dir, base_dir = self._remote_safe_path(rel_path)
+                if not target_dir:
+                    self._send_json({'error': '目标路径不合法'}, 400)
+                    return
+                os.makedirs(target_dir, exist_ok=True)
+                target_path = os.path.join(target_dir, filename)
+                with open(target_path, 'wb') as f:
+                    f.write(file_data)
+
+                print(f"[远程文件] 上传成功: {target_path}")
+                self._send_json({'success': True, 'path': os.path.relpath(target_path, base_dir).replace('\\', '/')})
+        except Exception as e:
+            print(f"[远程文件] 上传失败: {e}")
+            traceback.print_exc()
+            self._send_json({'error': str(e)}, 500)
+
+    def handle_remote_delete(self):
+        """删除文件或文件夹"""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+            data = json.loads(body) if body else {}
+            rel_path = data.get('path', '')
+
+            abs_path, base_dir = self._remote_safe_path(rel_path)
+            if not abs_path:
+                self._send_json({'error': '路径不合法'}, 400)
+                return
+            if not os.path.exists(abs_path):
+                self._send_json({'error': '路径不存在'}, 404)
+                return
+            if abs_path == base_dir:
+                self._send_json({'error': '不能删除根目录'}, 400)
+                return
+
+            import shutil
+            if os.path.isdir(abs_path):
+                shutil.rmtree(abs_path)
+            else:
+                os.remove(abs_path)
+
+            print(f"[远程文件] 删除成功: {abs_path}")
+            self._send_json({'success': True})
+        except Exception as e:
+            print(f"[远程文件] 删除失败: {e}")
+            traceback.print_exc()
+            self._send_json({'error': str(e)}, 500)
+
+    def handle_remote_mkdir(self):
+        """新建文件夹"""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+            data = json.loads(body) if body else {}
+            rel_path = data.get('path', '')
+
+            abs_path, base_dir = self._remote_safe_path(rel_path)
+            if not abs_path:
+                self._send_json({'error': '路径不合法'}, 400)
+                return
+
+            os.makedirs(abs_path, exist_ok=True)
+            print(f"[远程文件] 新建文件夹: {abs_path}")
+            self._send_json({'success': True, 'path': os.path.relpath(abs_path, base_dir).replace('\\', '/')})
+        except Exception as e:
+            print(f"[远程文件] 新建文件夹失败: {e}")
+            traceback.print_exc()
+            self._send_json({'error': str(e)}, 500)
+
+    def handle_remote_cmd(self):
+        """远程执行 CMD 命令（一次性返回结果）"""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else '{}'
+            data = json.loads(body) if body else {}
+            command = data.get('command', '').strip()
+            as_admin = data.get('asAdmin', False)
+
+            if not command:
+                self._send_json({'error': '命令不能为空'}, 400)
+                return
+
+            # 使用 CREATE_NO_WINDOW 标志，不显示 CMD 窗口
+            import subprocess as _sp
+            startupinfo = _sp.STARTUPINFO()
+            startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+
+            if as_admin and sys.platform == 'win32':
+                # 以管理员身份运行：使用 ShellExecute runas
+                # 先写入临时 bat 文件
+                import tempfile
+                bat_path = os.path.join(tempfile.gettempdir(), 'remote_cmd.bat')
+                with open(bat_path, 'w', encoding='utf-8') as f:
+                    f.write(f'@echo off\n{command}\n')
+                # 使用 runas 提权，但这种方式无法捕获输出
+                # 改用 powershell Start-Process -Verb RunAs 但捕获输出到文件
+                output_file = os.path.join(tempfile.gettempdir(), 'remote_cmd_output.txt')
+                with open(bat_path, 'w', encoding='utf-8') as f:
+                    f.write(f'@echo off\n{command} > "{output_file}" 2>&1\n')
+                _sp.Popen(
+                    ['powershell', '-Command', f'Start-Process -FilePath "{bat_path}" -Verb RunAs -Wait -WindowStyle Hidden'],
+                    startupinfo=startupinfo,
+                    creationflags=_sp.CREATE_NO_WINDOW,
+                    timeout=30
+                )
+                # 读取输出
+                output = ''
+                if os.path.exists(output_file):
+                    with open(output_file, 'r', encoding='utf-8', errors='replace') as f:
+                        output = f.read()
+                    os.remove(output_file)
+                os.remove(bat_path)
+            else:
+                # 普通执行
+                result = _sp.run(
+                    ['cmd', '/c', command],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    startupinfo=startupinfo,
+                    creationflags=_sp.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                )
+                output = result.stdout or ''
+                if result.stderr:
+                    output += '\n' + result.stderr
+                if result.returncode != 0:
+                    output += f'\n[退出码: {result.returncode}]'
+
+            print(f"[远程CMD] 执行: {command[:80]}...")
+            self._send_json({'output': output, 'command': command})
+        except _sp.TimeoutExpired:
+            self._send_json({'output': '命令执行超时（30秒）', 'error': 'timeout'}, 504)
+        except Exception as e:
+            print(f"[远程CMD] 执行失败: {e}")
+            traceback.print_exc()
+            self._send_json({'error': str(e)}, 500)
+
+    def handle_remote_cmd_stream(self):
+        """远程执行 CMD 命令（流式输出，Server-Sent Events）"""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            command = params.get('cmd', [''])[0]
+            as_admin = params.get('admin', ['false'])[0] == 'true'
+
+            if not command:
+                self._send_json({'error': '命令不能为空'}, 400)
+                return
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            import subprocess as _sp
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == 'win32':
+                startupinfo = _sp.STARTUPINFO()
+                startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+                creationflags = _sp.CREATE_NO_WINDOW
+
+            proc = _sp.Popen(
+                ['cmd', '/c', command],
+                stdout=_sp.PIPE,
+                stderr=_sp.STDOUT,
+                text=True,
+                bufsize=1,
+                startupinfo=startupinfo,
+                creationflags=creationflags
+            )
+
+            for line in proc.stdout:
+                line_data = json.dumps({'line': line.rstrip()}, ensure_ascii=False)
+                self.wfile.write(f'data: {line_data}\n\n'.encode('utf-8'))
+                self.wfile.flush()
+
+            proc.wait(timeout=60)
+            done_data = json.dumps({'done': True, 'code': proc.returncode}, ensure_ascii=False)
+            self.wfile.write(f'data: {done_data}\n\n'.encode('utf-8'))
+            self.wfile.flush()
+            print(f"[远程CMD] 流式执行完成: {command[:80]}...")
+        except Exception as e:
+            error_data = json.dumps({'error': str(e)}, ensure_ascii=False)
+            try:
+                self.wfile.write(f'data: {error_data}\n\n'.encode('utf-8'))
+                self.wfile.flush()
+            except:
+                pass
+            print(f"[远程CMD] 流式执行失败: {e}")
+
+    def handle_remote_camera(self):
+        """远程拍照：通过摄像头获取一张照片"""
+        try:
+            import subprocess as _sp
+            import tempfile
+
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == 'win32':
+                startupinfo = _sp.STARTUPINFO()
+                startupinfo.dwFlags |= _sp.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0
+                creationflags = _sp.CREATE_NO_WINDOW
+
+            # 尝试使用 ffmpeg 拍照
+            photo_path = os.path.join(tempfile.gettempdir(), 'remote_photo.jpg')
+
+            # 枚举视频设备，优先选择 UGREEN 或非 HiteVision 的摄像头
+            camera_device = None
+            if sys.platform == 'win32':
+                # 使用 ffmpeg -list_devices true -f dshow -i dummy 列出设备
+                try:
+                    list_result = _sp.run(
+                        ['ffmpeg', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy'],
+                        capture_output=True, text=True, timeout=10,
+                        startupinfo=startupinfo,
+                        creationflags=creationflags
+                    )
+                    devices_output = list_result.stderr or ''
+                    # 解析设备列表，查找包含 "UGREEN" 的设备名
+                    import re
+                    # ffmpeg dshow 设备列表格式: "video_device_name" (alternative)
+                    video_devices = re.findall(r'"([^"]+)"', devices_output)
+                    # 优先选择包含 UGREEN 的设备
+                    for dev in video_devices:
+                        if 'UGREEN' in dev.upper():
+                            camera_device = dev
+                            break
+                    # 如果没有 UGREEN，选择不含 HiteVision 的设备
+                    if not camera_device:
+                        for dev in video_devices:
+                            if 'HiteVision' not in dev and 'Hite' not in dev:
+                                camera_device = dev
+                                break
+                    # 如果还没找到，用第一个
+                    if not camera_device and video_devices:
+                        camera_device = video_devices[0]
+                except Exception as e:
+                    print(f"[远程拍照] 枚举摄像头失败: {e}")
+
+            # 拍照
+            if camera_device:
+                cmd = ['ffmpeg', '-f', 'dshow', '-i', f'video={camera_device}',
+                       '-frames:v', '1', '-y', photo_path]
+            else:
+                # Linux/Mac 或无法枚举设备时
+                cmd = ['ffmpeg', '-f', 'v4l2', '-i', '/dev/video0',
+                       '-frames:v', '1', '-y', photo_path] if sys.platform != 'win32' else \
+                      ['ffmpeg', '-f', 'gdigrab', '-i', 'desktop', '-frames:v', '1', '-y', photo_path]
+
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=15,
+                           startupinfo=startupinfo, creationflags=creationflags)
+
+            if os.path.exists(photo_path):
+                with open(photo_path, 'rb') as f:
+                    photo_data = f.read()
+                os.remove(photo_path)
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(photo_data)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(photo_data)
+                print(f"[远程拍照] 成功，照片大小: {len(photo_data)} bytes")
+            else:
+                # ffmpeg 不可用，尝试用 PowerShell 拍照
+                if sys.platform == 'win32':
+                    ps_script = '''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$capture = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height)
+$g = [System.Drawing.Graphics]::FromImage($capture)
+$g.CopyFromScreen([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Location, [System.Drawing.Point]::Empty, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Size)
+$capture.Save("''' + photo_path.replace('\\', '\\\\') + '''", [System.Drawing.Imaging.ImageFormat]::Jpeg)
+$g.Dispose()
+$capture.Dispose()
+'''
+                    ps_result = _sp.run(
+                        ['powershell', '-Command', ps_script],
+                        capture_output=True, text=True, timeout=10,
+                        startupinfo=startupinfo, creationflags=creationflags
+                    )
+                    if os.path.exists(photo_path):
+                        with open(photo_path, 'rb') as f:
+                            photo_data = f.read()
+                        os.remove(photo_path)
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'image/jpeg')
+                        self.send_header('Content-Length', str(len(photo_data)))
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(photo_data)
+                        print(f"[远程拍照] PowerShell截图成功，大小: {len(photo_data)} bytes")
+                    else:
+                        self._send_json({'error': '拍照失败：无法获取摄像头图像'}, 500)
+                else:
+                    self._send_json({'error': '拍照失败：ffmpeg 不可用'}, 500)
+        except Exception as e:
+            print(f"[远程拍照] 失败: {e}")
+            traceback.print_exc()
+            self._send_json({'error': str(e)}, 500)
+
+    def handle_remote_page(self):
+        """返回 remote.html 页面"""
+        try:
+            remote_path = os.path.join(get_app_dir(), 'remote.html')
+            if not os.path.exists(remote_path):
+                remote_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'remote.html')
+            if os.path.exists(remote_path):
+                with open(remote_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                body = content.encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_error(404, 'remote.html Not Found')
+        except Exception as e:
+            self.send_error(500, str(e))
 
     def handle_upload_file(self):
         """局域网直传：接收文件（支持multipart/form-data和二进制）"""
@@ -1994,18 +2527,13 @@ def create_tray_icon_impl():
         image = Image.new('RGBA', (64, 64), (59, 130, 246, 255))
 
     def on_open_files(icon, item):
-        """打开接收文件列表：优先弹出文件列表窗口，失败则直接打开文件夹"""
+        """已下架：发送文件功能已移除，直接打开接收文件夹"""
         try:
-            threading.Thread(target=show_received_files_window, daemon=True).start()
+            receive_dir = get_receive_dir()
+            os.makedirs(receive_dir, exist_ok=True)
+            _open_file_dir_async(receive_dir)
         except Exception as e:
-            print(f"[托盘] 打开文件列表失败: {e}")
-            # 兜底：直接打开接收文件夹
-            try:
-                receive_dir = get_receive_dir()
-                os.makedirs(receive_dir, exist_ok=True)
-                _open_file_dir_async(receive_dir)
-            except Exception as e2:
-                print(f"[托盘] 打开接收文件夹也失败: {e2}")
+            print(f"[托盘] 打开接收文件夹失败: {e}")
 
     def on_open_timer(icon, item):
         import webbrowser
@@ -2021,7 +2549,6 @@ def create_tray_icon_impl():
         os._exit(0)
 
     menu = pystray.Menu(
-        pystray.MenuItem('📂 打开接收文件列表', on_open_files),
         pystray.MenuItem('⏱ 打开计时系统', on_open_timer),
         pystray.MenuItem('🪑 智能选座系统', on_open_seat),
         pystray.MenuItem('❌ 退出系统', on_exit)
